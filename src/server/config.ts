@@ -25,13 +25,14 @@ export type AppConfig = {
   jwtSecret: string;
   transitiveUser: string;
 
-  // OIDC / Cognito
   cognitoClientId: string;
   cognitoClientSecret: string;
   cognitoRedirectUri: string;
 
   cognitoDomain: string;
   cognitoLogoutUri: string;
+
+  postLoginRedirectUrl: string;
 };
 
 export function loadConfig(): AppConfig {
@@ -65,5 +66,7 @@ export function loadConfig(): AppConfig {
 
     cognitoDomain: mustGet('COGNITO_DOMAIN'),
     cognitoLogoutUri: mustGet('COGNITO_LOGOUT_URI'),
+
+    postLoginRedirectUrl: mustGet('POST_LOGIN_REDIRECT_URL'),
   };
 }

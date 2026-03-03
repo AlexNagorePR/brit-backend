@@ -10,6 +10,7 @@ process.env.COGNITO_CLIENT_SECRET ||= 'test-client-secret';
 process.env.COGNITO_REDIRECT_URI ||= 'http://localhost/auth/callback';
 process.env.COGNITO_DOMAIN ||= 'example.auth.eu-south-2.amazoncognito.com';
 process.env.COGNITO_LOGOUT_URI ||= 'http://localhost/logout';
+process.env.POST_LOGIN_REDIRECT_URL ||= 'http://localhost:5173/';
 
 
 vi.mock('@transitive-sdk/utils', () => ({

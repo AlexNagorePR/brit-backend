@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 
+vi.mock('@/server/auth.js', () => ({
+  login: vi.fn(),
+  requireLogin: (req: any, _res: any, next: any) => {
+    req.session ||= {};
+    req.session.user = { _id: 'u1' };
+    next();
+  },
+}));
+
 vi.mock('@/server/portal.js', () => ({
   signPortalApiJWT: vi.fn(() => 'mock-portal-jwt'),
   fetchPortalApi: vi.fn(),

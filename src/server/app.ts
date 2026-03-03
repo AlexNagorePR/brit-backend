@@ -4,9 +4,9 @@ import jwt from 'jsonwebtoken';
 import session from 'express-session';
 import FileStoreFactory from 'session-file-store';
 import path from 'path';
+import fs from 'node:fs';
 
 import utils from '@transitive-sdk/utils';
-import { COOKIE_NAME } from '@/common/constants.js';
 import { loadConfig } from '@/server/config.js';
 import { login, requireLogin } from '@/server/auth.js';
 import { signPortalApiJWT, fetchPortalApi } from '@/server/portal.js';
@@ -28,19 +28,34 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   const app = express();
   app.use(express.json());
 
+  const isProd = config.nodeEnv === 'production';
+
+  const sessionsDir = path.join(config.varDir, 'sessions');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const fileStore = new FileStore({
+    path: sessionsDir,
+    retries: 0,
+  });
+
   app.use(
     session({
-      store: new FileStore({ path: path.join(config.varDir, 'sessions') }),
+      name: 'connect.sid',
+      store: fileStore,
       secret: config.sessionSecret,
       resave: false,
       saveUninitialized: false,
-      cookie: { maxAge: 3 * 24 * 60 * 60 * 1000 },
+      proxy: isProd,
+      cookie:{
+        maxAge: 3 * 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        sameSite: isProd ? 'lax' : 'lax',
+        secure: isProd,
+      },
     })
   );
 
-  // --- routes ---
-
-  // Basic auth status (compatible con tu front actual)
+  // Basic auth status
   app.get('/api/user', (req: any, res) => {
     const user = req.session?.user;
     return res.json({
@@ -49,7 +64,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     });
   });
 
-  // Login with OIDC provider (Cognito)
+  // OIDC login
   app.get('/auth/login', (req: any, res) => {
     if (!oidcClient) return res.status(500).send('OIDC client not initialized');
 
@@ -88,7 +103,13 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         return res.status(400).send('Invalid/expired state. Please try again.');
       }
 
-      delete req.session.oidc!.pending![returnedState];
+      const OIDC_STATE_TTL_MS = 10 * 60 * 1000;
+      if (Date.now() - pending.ts > OIDC_STATE_TTL_MS) {
+        if (req.session?.oidc?.pending) delete req.session.oidc.pending[returnedState];
+        return res.status(400).send('Login expired. Please try again.');
+      }
+
+      if (req.session?.oidc?.pending) delete req.session.oidc!.pending![returnedState];
 
       const tokenSet = await oidcClient.callback(
         config.cognitoRedirectUri,
@@ -100,9 +121,10 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       const groups: string[] = (claims['cognito:groups'] as string[]) || [];
 
       if (!groups.includes('allowed')) {
-        req.session.user = null;
-        res.clearCookie(COOKIE_NAME);
-        return res.status(403).send('User not allowed');
+        return req.session.destroy(() => {
+          res.clearCookie('connect.sid');
+          return res.redirect(`${config.postLoginRedirectUrl}?error=not_allowed`)
+        });
       }
 
       const email = claims.email as string | undefined;
@@ -116,7 +138,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         created: new Date(),
       };
 
-      return login(req, res, { account: accountLike, redirect: '/dashboard/devices' });
+      return login(req, res, { account: accountLike, redirect: config.postLoginRedirectUrl });
     } catch (err: any) {
       if (res.headersSent) {
         log.error('Callback error after headers sent', err);
@@ -127,36 +149,16 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     }
   });
 
+  // Logout
   app.get('/auth/logout', (req: any, res) => {
-    req.session.user = null;
-    req.session.oidc = null;
-
-    req.session.save(() => {
-      req.session.regenerate(() => {
-        res.clearCookie(COOKIE_NAME);
-
-        const url =
-          `https://${config.cognitoDomain}/logout` +
-          `?client_id=${encodeURIComponent(config.cognitoClientId)}` +
-          `&logout_uri=${encodeURIComponent(config.cognitoLogoutUri)}`;
-
-        return res.redirect(url);
-      });
+    req.session.destroy(() => {
+      res.clearCookie('connect.sid');
+      const url =
+        `https://${config.cognitoDomain}/logout` +
+        `?client_id=${encodeURIComponent(config.cognitoClientId)}` +
+        `&logout_uri=${encodeURIComponent(config.cognitoLogoutUri)}`;
+      return res.redirect(url);
     });
-  });
-
-  // Refresh session cookie
-  app.get('/api/refresh', (req: any, res) => {
-    const fail = (error: string) =>
-      res.clearCookie(COOKIE_NAME).status(401).json({ error, ok: false });
-
-    const user = req.session?.user;
-    if (!user || !user._id) {
-      log.info('no session user');
-      return fail('no session');
-    }
-
-    return login(req, res, { account: user, redirect: false });
   });
 
   // Get a JWT token for the current user
@@ -186,7 +188,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     return res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  app.get('/api/devices', async (_req, res) => {
+  app.get('/api/devices', requireLogin, async (_req, res) => {
     try {
       const token = signPortalApiJWT({
         jwtSecret: config.jwtSecret,
@@ -196,7 +198,6 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
 
       const url =
         'https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/info/';
-
       const data = await fetchPortalApi<any>(token, url, { timeoutMs: 7000 });
 
       return res.json(
@@ -210,9 +211,6 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       return res.status(502).json({ error: 'Portal API request failed' });
     }
   });
-
-  // Protege dashboard
-  app.use('/dashboard/', requireLogin);
 
   return app;
 }
