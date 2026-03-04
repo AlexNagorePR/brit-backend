@@ -10,7 +10,7 @@ import utils from '@transitive-sdk/utils';
 import { loadConfig } from '@/server/config.js';
 import { login, requireLogin } from '@/server/auth.js';
 import { signPortalApiJWT, fetchPortalApi } from '@/server/portal.js';
-import { createDb } from '@/server/db.js';
+import { createDb, RobotInfo } from '@/server/db.js';
 import { generators } from 'openid-client';
 
 const log = utils.getLogger('app');
@@ -194,9 +194,9 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   app.get('/api/devices', requireLogin, async (req, res) => {
     let user = req.session.user._id;
 
-    let robotIds: string[];
+    let robots: RobotInfo[];
     try {
-      robotIds = await db.getRobotIdsForUser(user);
+      robots = await db.getRobotIdsForUser(user);
     } catch (err) {
       log.error('DB failed on /api/devices', err);
       return res.status(500).json({ error: 'Devices failed' });
@@ -210,14 +210,16 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       });
 
       const results = await Promise.all(
-        robotIds.map(async (id) => {
-          const url = `https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/${encodeURIComponent(id)}`;
+        robots.map(async (robot) => {
+          const url = `https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/${encodeURIComponent(robot.id)}`;
           const data = await fetchPortalApi<any>(token, url, { timeoutMs: 7000 });
-          return { id, ...(data || {}) };
+          return { 
+            id: robot.id,
+            name: robot.name,
+            ...(data || {})
+          };
         })
       );
-
-      console.log('Devices results', results);
 
       return res.json(results);
     } catch (err) {
