@@ -12,6 +12,8 @@ process.env.COGNITO_DOMAIN ||= 'example.auth.eu-south-2.amazoncognito.com';
 process.env.COGNITO_LOGOUT_URI ||= 'http://localhost/logout';
 process.env.POST_LOGIN_REDIRECT_URL ||= 'http://localhost:5173/';
 
+process.env.DATABASE_URL ||= 'postgresql://user:pass@localhost:5432/db';
+
 
 vi.mock('@transitive-sdk/utils', () => ({
   default: {

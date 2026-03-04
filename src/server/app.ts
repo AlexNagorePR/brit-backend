@@ -10,6 +10,7 @@ import utils from '@transitive-sdk/utils';
 import { loadConfig } from '@/server/config.js';
 import { login, requireLogin } from '@/server/auth.js';
 import { signPortalApiJWT, fetchPortalApi } from '@/server/portal.js';
+import { createDb } from '@/server/db.js';
 import { generators } from 'openid-client';
 
 const log = utils.getLogger('app');
@@ -37,6 +38,8 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     path: sessionsDir,
     retries: 0,
   });
+
+  const db = createDb(config.databaseUrl);
 
   app.use(
     session({
@@ -188,7 +191,17 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     return res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  app.get('/api/devices', requireLogin, async (_req, res) => {
+  app.get('/api/devices', requireLogin, async (req, res) => {
+    let user = req.session.user._id;
+
+    let robotIds: string[];
+    try {
+      robotIds = await db.getRobotIdsForUser(user);
+    } catch (err) {
+      log.error('DB failed on /api/devices', err);
+      return res.status(500).json({ error: 'Devices failed' });
+    }
+
     try {
       const token = signPortalApiJWT({
         jwtSecret: config.jwtSecret,
@@ -196,20 +209,19 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         validitySeconds: 60,
       });
 
-      const url =
-        'https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/';
-      const data = await fetchPortalApi<any>(token, url, { timeoutMs: 7000 });
-
-      console.log('Portal API response', { url, data });
-
-      return res.json(
-        Object.entries(data || {}).map(([id, value]) => ({
-          id,
-          ...(value as any),
-        }))
+      const results = await Promise.all(
+        robotIds.map(async (id) => {
+          const url = `https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/${encodeURIComponent(id)}`;
+          const data = await fetchPortalApi<any>(token, url, { timeoutMs: 7000 });
+          return { id, ...(data || {}) };
+        })
       );
-    } catch (err: any) {
-      log.error('Portal API request failed', err);
+
+      console.log('Devices results', results);
+
+      return res.json(results);
+    } catch (err) {
+      log.error('Portal API failed on /api/devices', err);
       return res.status(502).json({ error: 'Portal API request failed' });
     }
   });

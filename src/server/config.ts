@@ -33,6 +33,8 @@ export type AppConfig = {
   cognitoLogoutUri: string;
 
   postLoginRedirectUrl: string;
+
+  databaseUrl: string;
 };
 
 export function loadConfig(): AppConfig {
@@ -68,5 +70,7 @@ export function loadConfig(): AppConfig {
     cognitoLogoutUri: mustGet('COGNITO_LOGOUT_URI'),
 
     postLoginRedirectUrl: mustGet('POST_LOGIN_REDIRECT_URL'),
+    
+    databaseUrl: mustGet('DATABASE_URL'),
   };
 }
