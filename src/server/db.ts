@@ -7,13 +7,14 @@ export type RobotInfo = {
 
 export type Db = {
   getRobotIdsForUser(user: string): Promise<RobotInfo[]>;
+  createUser(email:string): Promise<void>;
 };
 
 export function createDb(databaseUrl: string): Db {
   const pool = new Pool({ connectionString: databaseUrl });
 
   return {
-    async getRobotIdsForUser(user: string): Promise<RobotInfo[]> {
+    async getRobotIdsForUser(user) {
       const { rows } = await pool.query(
         `SELECT r.robot_id, r.robot_name
          FROM user_robots ur
@@ -26,6 +27,15 @@ export function createDb(databaseUrl: string): Db {
         id: r.robot_id,
         name: r.robot_name,
       }));
-    }
+    },
+
+    async createUser(email) {
+      await pool.query(
+        `INSERT INTO users (email)
+         VALUES ($1)
+         ON CONFLICT (email) DO NOTHING`,
+         [email]
+      );
+    },
   };
 }

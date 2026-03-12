@@ -261,15 +261,21 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   });
 
   app.post('/admin/users', requireAdmin, async (req, res) => {
+    const { email, groups, temporaryPassword, givenName, familyName } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'email is required',
+      });
+    }
+
+    if (groups && !Array.isArray(groups)) {
+      return res.status(400).json({
+        error: 'groups must be an array of strings',
+      });
+    }
+
     try {
-      const { email, temporaryPassword, givenName, familyName, groups} = req.body || {};
-
-      if (!email) {
-        return res.status(400).json({
-          error: 'email are required',
-        });
-      }
-
       const user = await cognitoAdmin.createUser({
         email,
         temporaryPassword,
@@ -277,6 +283,8 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         familyName,
         groups,
       });
+
+      await db.createUser(email);
 
       return res.status(201).json(user);
     } catch (err) {
@@ -303,10 +311,6 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   app.post('/admin/users/:username/groups', requireAdmin, async (req, res) => {
     const username = req.params.username;
     const { groups } = req.body || {};
-
-    console.log('Req.body:', req.body);
-
-    console.log('Groups:', groups);
 
     if (!Array.isArray(groups)) {
       return res.status(400).json({
