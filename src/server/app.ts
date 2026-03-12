@@ -8,10 +8,12 @@ import fs from 'node:fs';
 
 import utils from '@transitive-sdk/utils';
 import { loadConfig } from '@/server/config.js';
-import { login, requireLogin } from '@/server/auth.js';
+import { login, requireAdmin, requireLogin } from '@/server/auth.js';
 import { signPortalApiJWT, fetchPortalApi } from '@/server/portal.js';
 import { createDb, RobotInfo } from '@/server/db.js';
 import { generators } from 'openid-client';
+import { getTelemetryData, subscribeTelemetry } from '@/server/ros.js';
+import { createCognitoAdminService,  } from './cognito-admin.js';
 
 const log = utils.getLogger('app');
 const FileStore = FileStoreFactory(session);
@@ -40,6 +42,11 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   });
 
   const db = createDb(config.databaseUrl);
+
+  const cognitoAdmin = createCognitoAdminService({
+    region: config.cognitoRegion,
+    userPoolId: config.cognitoUserPoolId,
+  });
 
   app.use(
     session({
@@ -192,7 +199,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   });
 
   app.get('/api/devices', requireLogin, async (req, res) => {
-    let user = req.session.user._id;
+    const user = req.session.user!._id;
 
     let robots: RobotInfo[];
     try {
@@ -212,7 +219,14 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       const results = await Promise.all(
         robots.map(async (robot) => {
           const url = `https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/${encodeURIComponent(robot.id)}`;
-          const data = await fetchPortalApi<any>(token, url, { timeoutMs: 7000 });
+          const data = await fetchPortalApi<any>(token, url, { timeoutMs: 14000 });
+
+          subscribeTelemetry({
+            jwtSecret: config.jwtSecret,
+            transitiveUser: config.transitiveUser,
+            deviceId: robot.id,
+          }).catch(err => log.error('Battery subscribe failed', err));
+          
           return { 
             id: robot.id,
             name: robot.name,
@@ -220,11 +234,149 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
           };
         })
       );
-
       return res.json(results);
     } catch (err) {
       log.error('Portal API failed on /api/devices', err);
       return res.status(502).json({ error: 'Portal API request failed' });
+    }
+  });
+
+  app.get('/api/data/:deviceId', requireLogin, async (req, res) => {
+
+    return res.json({
+      deviceId: req.params.deviceId,
+      telemetry: getTelemetryData(req.params.deviceId),
+    });
+  });
+
+  app.get('/admin/users', requireAdmin, async (_req, res) => {
+    console.log('Consultando usuarios Cognito...');
+    try {
+      const users = await cognitoAdmin.listUsers();
+      return res.json(users);
+    } catch (err) {
+      log.error('Cognito list users failed', err);
+      return res.status(502).json({ error: 'List users failed' });
+    }
+  });
+
+  app.post('/admin/users', requireAdmin, async (req, res) => {
+    try {
+      const { email, temporaryPassword, givenName, familyName, groups} = req.body || {};
+
+      if (!email) {
+        return res.status(400).json({
+          error: 'email are required',
+        });
+      }
+
+      const user = await cognitoAdmin.createUser({
+        email,
+        temporaryPassword,
+        givenName,
+        familyName,
+        groups,
+      });
+
+      return res.status(201).json(user);
+    } catch (err) {
+      log.error('Cognito create user failed', err);
+      return res.status(502).json({ error: 'Create user failed' });
+    }
+  });
+
+  app.get('/admin/users/:username', requireAdmin, async(req, res) => {
+    try {
+      const user = await cognitoAdmin.getUser(req.params.username);
+      return res.json(user);
+    } catch (err: any) {
+      log.error('Cognito get user failed', err);
+
+      if (err?.name === 'UserNotFoundException') {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      return res.status(502).json({ error: 'Get user failed' });
+    }
+  });
+
+  app.post('/admin/users/:username/groups', requireAdmin, async (req, res) => {
+    const username = req.params.username;
+    const { groups } = req.body || {};
+
+    console.log('Req.body:', req.body);
+
+    console.log('Groups:', groups);
+
+    if (!Array.isArray(groups)) {
+      return res.status(400).json({
+        error: 'group must be an array',
+      });
+    }
+
+    const normalizedGroups = groups.filter(
+      (g: unknown): g is string => typeof g === 'string' && g.trim().length > 0
+    );
+
+    const allowedGroups = new Set(['allowed', 'admin']);
+
+    const invalidGroups = normalizedGroups.filter((g) => !allowedGroups.has(g));
+    if (invalidGroups.length > 0) {
+      return res.status(400).json({
+        error: `Invalid groups: ${invalidGroups.join(', ')}`,
+      });
+    }
+
+    try {
+      const user = await cognitoAdmin.getUser(username);
+      const currentGroups = user.groups || [];
+
+      const groupsToAdd = normalizedGroups.filter((g) => !currentGroups.includes(g));
+      const groupsToRemove = currentGroups.filter((g: string) => !normalizedGroups.includes(g));
+
+      if (groupsToAdd.length > 0) {
+        await cognitoAdmin.addUserToGroups(username, groupsToAdd);
+      }
+
+      if (groupsToRemove.length > 0) {
+        await cognitoAdmin.removeUserFromGroups(username, groupsToRemove);
+      }
+
+      const updatedUser = await cognitoAdmin.getUser(username);
+      return res.json(updatedUser);
+    } catch (err) {
+      log.error('Set user groups failed', err);
+      return res.status(502).json({ error: 'Set user groups failed' });
+    }
+  });
+
+  app.post('/admin/users/:username/disable', requireAdmin, async (req, res) => {
+    try {
+      await cognitoAdmin.disableUser(req.params.username);
+      return res.json({ ok: true, username: req.params.username, enabled: false });
+    } catch (err: any) {
+      log.error('Cognito disable user failed', err);
+
+      if (err?.name === 'UserNotFoundException') {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      return res.status(502).json({ error: 'Disable user failed' });
+    }
+  });
+
+  app.post('/admin/users/:username/enable', requireAdmin, async (req, res) => {
+    try {
+      await cognitoAdmin.enableUser(req.params.username);
+      return res.json({ ok: true, username: req.params.username, enabled: true });
+    } catch (err: any) {
+      log.error('Cognito enable user failed', err);
+
+      if (err?.name === 'UserNotFoundException') {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      return res.status(502).json({ error: 'Enable user failed' });
     }
   });
 

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
+import { createApp } from '@/server/app.js';
+import { fetchPortalApi, signPortalApiJWT } from '@/server/portal.js';
 
 const mockDb = vi.hoisted(() => ({
   getRobotIdsForUser: vi.fn(),
@@ -23,20 +25,20 @@ vi.mock('@/server/portal.js', () => ({
   fetchPortalApi: vi.fn(),
 }));
 
-import { createApp } from '@/server/app.js';
-import { fetchPortalApi, signPortalApiJWT } from '@/server/portal.js';
-
 describe('Devices', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('GET /api/devices maps portal object into array with id', async () => {
-    mockDb.getRobotIdsForUser.mockResolvedValue(['d1', 'd2']);
+    mockDb.getRobotIdsForUser.mockResolvedValue([
+      { id: 'd1', name: 'Robot 1' },
+      { id: 'd2', name: 'Robot 2' },
+    ]);
 
     (fetchPortalApi as any)
-      .mockResolvedValueOnce({ running: true, name: 'Robot 1' })
-      .mockResolvedValueOnce({ running: false, name: 'Robot 2' });
+      .mockResolvedValueOnce({ running: true})
+      .mockResolvedValueOnce({ running: false});
 
     const app = createApp({
       oidcClient: { authorizationUrl: () => 'http://example/redirect' } as any,

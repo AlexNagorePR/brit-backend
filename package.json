@@ -4,12 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "nodemon -w src/server -x tsx src/server/main.ts",
-    "start": "NODE_ENV=production tsx src/server/main.ts",
+    "dev": "NODE_OPTIONS=--no-network-family-autoselection nodemon -w src/server -x tsx src/server/main.ts",
+    "start": "NODE_ENV=production NODE_OPTIONS=--no-network-family-autoselection tsx src/server/main.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1007.0",
+    "@transitive-sdk/utils": "^0.16.3",
     "dotenv": "^16.4.5",
     "dotenv-expand": "^11.0.6",
     "ejs": "^3.1.10",
@@ -17,6 +19,7 @@
     "express-session": "^1.18.1",
     "jsonwebtoken": "^9.0.3",
     "lodash": "^4.17.21",
+    "mqtt": "^5.15.0",
     "openid-client": "^5.7.0",
     "pg": "^8.19.0",
     "portfinder": "^1.0.32",
@@ -26,10 +29,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.12.0",
-    "@transitive-sdk/utils": "^0.16.2",
     "@types/express": "^4.17.21",
     "@types/express-session": "^1.18.2",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/mqtt": "^0.0.34",
     "@types/node": "^20.16.11",
     "@types/pg": "^8.18.0",
     "@types/session-file-store": "^1.2.6",

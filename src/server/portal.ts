@@ -4,21 +4,48 @@ import jwt from 'jsonwebtoken';
 export function signPortalApiJWT(opts: {
   jwtSecret: string;
   transitiveUser: string;
-  portalUserId?: string; // si lo quieres fijo o configurable
+  userId?: string; // si lo quieres fijo o configurable
   validitySeconds?: number;
 }) {
   const {
     jwtSecret,
     transitiveUser,
-    portalUserId = 'phenomenonrobotics',
+    userId = 'phenomenonrobotics',
     validitySeconds = 60,
   } = opts;
 
   return jwt.sign(
     {
-      userId: portalUserId,
+      userId: userId,
       api: 1,
       id: transitiveUser,
+      validity: validitySeconds,
+    },
+    jwtSecret
+  );
+}
+
+export function signRosToolJWT(opts: {
+  jwtSecret: string;
+  transitiveUser: string;
+  deviceId: string;
+  userId?: string;
+  validitySeconds?: number;
+}) {
+  const {
+    jwtSecret,
+    transitiveUser,
+    deviceId,
+    userId = 'phenomenonrobotics',
+    validitySeconds = 86400,
+  } = opts;
+
+  return jwt.sign(
+    {
+      id: transitiveUser,
+      device: deviceId,
+      capability: '@transitive-robotics/ros-tool',
+      userId,
       validity: validitySeconds,
     },
     jwtSecret
@@ -30,7 +57,7 @@ export async function fetchPortalApi<T = any>(
   url: string,
   opts: { timeoutMs?: number } = {}
 ): Promise<T> {
-  const { timeoutMs = 7000 } = opts;
+  const { timeoutMs = 14000 } = opts;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);

@@ -13,7 +13,7 @@ const config = loadConfig();
 
 async function initializeOIDCClient() {
   const issuer = await Issuer.discover(
-    'https://cognito-idp.eu-south-2.amazonaws.com/eu-south-2_8UYEtI33x'
+    config.cognitoIssuerUrl,
   );
 
   const oidcClient = new issuer.Client({

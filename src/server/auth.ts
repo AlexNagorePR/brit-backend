@@ -3,7 +3,7 @@ import utils from '@transitive-sdk/utils';
 const log = utils.getLogger('auth');
 log.setLevel('debug');
 
-interface AccountLike {
+export interface AccountLike {
     _id: string;
     email?: string;
     admin?: boolean;
@@ -34,6 +34,26 @@ export const requireLogin = (req: any, res: any, next: any) => {
   }
     
   return res.redirect('/auth/login');
+};
+
+export const requireAdmin = (req: any, res: any, next: any) => {
+  const user = req.session?.user;
+
+  if (!user?._id) {
+    return res.status(401).json({
+      error: 'Not authorized. Please log in.',
+      ok: false,
+    });
+  }
+
+  if (!user.admin) {
+    return res.status(403).json({
+      error: 'Forbiden. Admin acess required.',
+      ok: false,
+    });
+  }
+
+  return next();
 };
 
 export const login = (

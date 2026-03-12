@@ -34,6 +34,10 @@ export type AppConfig = {
 
   postLoginRedirectUrl: string;
 
+  cognitoIssuerUrl: string;
+  cognitoRegion: string;
+  cognitoUserPoolId: string;
+
   databaseUrl: string;
 };
 
@@ -41,8 +45,6 @@ export function loadConfig(): AppConfig {
   const nodeEnv = get('NODE_ENV', 'development')!;
   const isProd = nodeEnv === 'production';
 
-  // En prod, secretos obligatorios; en dev puedes aflojar si quieres,
-  // pero yo recomiendo obligatorios siempre para evitar sorpresas.
   const sessionSecret = isProd ? mustGet('TRANSACT_SESSION_SECRET') : mustGet('TRANSACT_SESSION_SECRET');
   const jwtSecret = isProd ? mustGet('JWT_SECRET') : mustGet('JWT_SECRET');
   const transitiveUser = mustGet('TRANSITIVE_USER');
@@ -70,7 +72,11 @@ export function loadConfig(): AppConfig {
     cognitoLogoutUri: mustGet('COGNITO_LOGOUT_URI'),
 
     postLoginRedirectUrl: mustGet('POST_LOGIN_REDIRECT_URL'),
-    
+
+    cognitoIssuerUrl: mustGet('COGNITO_ISSUER_URL'),
+    cognitoRegion: mustGet('AWS_REGION'),
+    cognitoUserPoolId: mustGet('COGNITO_USER_POOL_ID'),
+
     databaseUrl: mustGet('DATABASE_URL'),
   };
 }

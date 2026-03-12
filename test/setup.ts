@@ -12,6 +12,9 @@ process.env.COGNITO_DOMAIN ||= 'example.auth.eu-south-2.amazoncognito.com';
 process.env.COGNITO_LOGOUT_URI ||= 'http://localhost/logout';
 process.env.POST_LOGIN_REDIRECT_URL ||= 'http://localhost:5173/';
 
+process.env.COGNITO_REGION ||= 'eu-south-2';
+process.env.COGNITO_USER_POOL_ID ||= 'eu-south-2_testpool';
+
 process.env.DATABASE_URL ||= 'postgresql://user:pass@localhost:5432/db';
 
 
