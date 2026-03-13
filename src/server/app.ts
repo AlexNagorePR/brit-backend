@@ -14,6 +14,7 @@ import { createDb, RobotInfo } from '@/server/db.js';
 import { generators } from 'openid-client';
 import { getTelemetryData, subscribeTelemetry } from '@/server/ros.js';
 import { createCognitoAdminService,  } from './cognito-admin.js';
+import { json } from 'node:stream/consumers';
 
 const log = utils.getLogger('app');
 const FileStore = FileStoreFactory(session);
@@ -383,6 +384,27 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       return res.status(502).json({ error: 'Enable user failed' });
     }
   });
+
+  app.delete('/admin/users/:username', requireAdmin, async (req, res) => {
+    const username = req.params.username;
+    
+    if (req.session.user?.email === username) {
+      return res.status(400).json({
+        error: 'cannot_delete_self'
+      });
+    }
+
+    try {
+      await cognitoAdmin.deleteUser(username);
+
+      await db.deleteUser(username);
+
+      return res.json({ ok: true, username });
+    } catch (err) {
+      log.error('Delete user failed', err);
+      return res.status(502).json({ error: 'Delete user failed' })
+    }
+  })
 
   app.get('/', (_req, res) => {
     res.json({

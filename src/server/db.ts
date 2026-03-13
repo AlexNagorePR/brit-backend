@@ -8,6 +8,7 @@ export type RobotInfo = {
 export type Db = {
   getRobotIdsForUser(user: string): Promise<RobotInfo[]>;
   createUser(email:string): Promise<void>;
+  deleteUser(email:string): Promise<void>;
 };
 
 export function createDb(databaseUrl: string): Db {
@@ -34,6 +35,14 @@ export function createDb(databaseUrl: string): Db {
         `INSERT INTO users (email)
          VALUES ($1)
          ON CONFLICT (email) DO NOTHING`,
+         [email]
+      );
+    },
+
+    async deleteUser(email) {
+      await pool.query(
+        `DELETE FROM users (email)
+         WHERE email = $1`,
          [email]
       );
     },

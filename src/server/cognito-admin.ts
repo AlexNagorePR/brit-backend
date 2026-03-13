@@ -8,6 +8,7 @@ import {
     AdminAddUserToGroupCommand,
     AdminRemoveUserFromGroupCommand,
     AdminListGroupsForUserCommand,
+    AdminDeleteUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 
 export type CognitoAdminService = {
@@ -22,6 +23,7 @@ export type CognitoAdminService = {
     getUser(username: string): Promise<any>;
     disableUser(username: string): Promise<any>;
     enableUser(username: string): Promise<any>;
+    deleteUser(username: string): Promise<void>;
     addUserToGroups(username: string, groups: string[]): Promise<void>;
     removeUserFromGroups(username: string, groups: string[]): Promise<void>;
 };
@@ -176,6 +178,15 @@ export function createCognitoAdminService(opts: {
                 groups,
                 userMFASettingList: out.UserMFASettingList || [],
             };
+        },
+
+        async deleteUser(username) {
+            await client.send(
+                new AdminDeleteUserCommand({
+                    UserPoolId: userPoolId,
+                    Username: username,
+                })
+            );
         },
 
         async disableUser(username) {
