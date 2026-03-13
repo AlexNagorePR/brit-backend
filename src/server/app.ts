@@ -406,6 +406,78 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     }
   })
 
+  app.post('/admin/robots/sync', requireAdmin, async (_req, res) => {
+    try {
+      const token = signPortalApiJWT({
+        jwtSecret: config.jwtSecret,
+        transitiveUser: config.transitiveUser,
+        validitySeconds: 60,
+      });
+
+      const url = `https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/info/`;
+      const data = await fetchPortalApi<any>(token, url, { timeoutMs: 14000 });
+
+      const robots: RobotInfo[] = Object.entries(data || {})
+        .filter(([, value]: [string, any]) => value!.os?.hostname)
+        .map(([id, value]: [string, any]) => ({
+          id,
+          hostname: value.os.hostname,
+        })
+      );
+
+      await db.syncRobotsSnapshot(robots);
+
+      return res.json({
+        ok: true,
+        count: robots.length,
+        robots,
+      });
+    } catch (err) {
+      log.error('Robot sync failed', err);
+      return res.status(502).json({ error: 'Robot sync failed' });
+    }
+  });
+
+  app.get('/admin/robots', requireAdmin, async (_req, res) => {
+    try {
+      const robots = await db.getAllRobots();
+      return res.json(robots);
+    } catch (err) {
+      log.error('List robots failed', err);
+      return res.status(500).json({ error: 'List robots failed' });
+    }
+  });
+
+  app.patch('/api/robots/:robotId/rename', requireLogin, async (req, res) => {
+    const userId = req.session.user!._id;
+    const robotId = req.params.robotId;
+    const { name } = req.body || {};
+
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    try {
+      const robots = await db.getRobotIdsForUser(userId);
+      const hasAcces = robots.some((robot) => robot.id === robotId);
+
+      if (!hasAcces) {
+        return res.status(403).json({ error: 'Robot not found' })
+      }
+
+      await db.updateRobotName(robotId, name.trim());
+
+      return res.json({
+        ok: true,
+        robotId,
+        name: name.trim(),
+      });
+    } catch (err) {
+      log.error('Update robot name failed', err);
+      return res.status(500).json({ error: 'Update robot name failed' });
+    }
+  });
+
   app.get('/', (_req, res) => {
     res.json({
       service: 'transact-backend',

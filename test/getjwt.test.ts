@@ -8,6 +8,11 @@ vi.mock('@/server/auth.js', () => ({
     req.session.user = { _id: 'u1' };
     next();
   },
+  requireAdmin: (req: any, _res: any, next: any) => {
+    req.session ||= {};
+    req.session.user = { _id: 'admin1', admin: true };
+    next();
+  },
 }));
 
 import { createApp } from '@/server/app.js';

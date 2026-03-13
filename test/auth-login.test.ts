@@ -4,7 +4,7 @@ import request from 'supertest';
 vi.mock('@/server/auth.js', () => ({
   login: vi.fn(),
   requireLogin: (_req: any, _res: any, next: any) => next(),
-
+  requireAdmin: (req: any, _res: any, next: any) => next(),
 }));
 
 import { createApp } from '@/server/app.js';
