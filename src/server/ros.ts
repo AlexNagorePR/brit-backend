@@ -1,6 +1,7 @@
 // src/server/ros.ts
 import { signRosToolJWT } from '@/server/portal.js';
 import utils from '@transitive-sdk/utils';
+import { pathToFileURL } from 'node:url';
 
 const telemetryCache: Record<string, any> = {};
 const subscribedDevices = new Set<string>();
@@ -14,6 +15,12 @@ const BRIT_STATE_MAP: Record<number, string> = {
     5: 'Manual',
     6: 'Free',
 };
+
+const INK_LEVEL_MAP: Record<number, string> = {
+    0: 'Bajo',
+    1: 'OK',
+    2: 'Max',
+}
 
 function ensureDeviceCache(deviceId: string) {
   if (!telemetryCache[deviceId]) {
@@ -56,7 +63,6 @@ export async function subscribeTelemetry(opts: {
         const cache = ensureDeviceCache(opts.deviceId);
 
         rosTool.subscribe(2, '/battery');
-        rosTool.subscribe(2, '/voltage');
         rosTool.subscribe(2, '/state');
         rosTool.subscribe(2, '/alarm');
         rosTool.subscribe(2, '/ink_level');
@@ -64,17 +70,13 @@ export async function subscribeTelemetry(opts: {
         rosTool.subscribe(2, '/leica_battery_percentage');
         rosTool.subscribe(2, '/progress');
 
+
         rosTool.onData(() => {
             const value = rosTool.deviceData?.ros?.[2]?.messages?.battery;
             if (!value) return;
-            cache.battery = value;
+            cache.battery = value.percentage*100;
+            cache.voltage = value.voltage
         }, 'ros/2/messages/battery');
-
-        rosTool.onData(() => {
-            const value = rosTool.deviceData?.ros?.[2]?.messages?.voltage;
-            if (!value) return;
-            cache.voltage = value;
-        }, 'ros/2/messages/voltage');
 
         rosTool.onData(() => {
             const value = rosTool.deviceData?.ros?.[2]?.messages?.state;
@@ -92,6 +94,7 @@ export async function subscribeTelemetry(opts: {
             const value = rosTool.deviceData?.ros?.[2]?.messages?.ink_level;
             if (value == null) return;
             cache.inkLevel = value;
+            console.log("Device:", opts.deviceId, "Ink_level:", value);
         }, 'ros/2/messages/ink_level');
 
         rosTool.onData(() => {
@@ -124,14 +127,14 @@ export function getTelemetryData(deviceId: string) {
 
     if (!t) return null;
 
-    console.log("Telemetry:", t)
+    //console.log("Device:", deviceId, "\nTelemetria:", t);
 
     return {
-        battery: t.battery?.data ?? null,
-        voltage: t.voltage?.data ?? null,
+        battery: t.battery ?? null,
+        voltage: t.voltage ?? null,
         state: BRIT_STATE_MAP[t.state?.data] ?? null,
         alarm: t.alarm?.data ?? null,
-        inkLevel: t.inkLevel?.data ?? null,
+        inkLevel: INK_LEVEL_MAP[t.inkLevel?.data] ?? null,
         topconBattery: t.topconBattery?.data ?? null,
         leicaBatteryPercentage: t.leicaBatteryPercentage?.data ?? null,
         progress: t.progress?.data ?? null,

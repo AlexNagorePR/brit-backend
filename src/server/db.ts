@@ -9,6 +9,11 @@ export type RobotInfo = {
 
 export type Db = {
   getRobotIdsForUser(user: string): Promise<RobotInfo[]>;
+  getUsersIdsForRobot(user: string): Promise<string[]>;
+  setUsersForRobot(robotId: string, userIds: string[]): Promise<void>;
+  addUserToRobot(robotId: string, userId: string): Promise<void>;
+  removeUserFromRobot(robotId: string, userId: string): Promise<void>;
+
   createUser(email:string): Promise<void>;
   deleteUser(email:string): Promise<void>;
 
@@ -25,7 +30,7 @@ export function createDb(databaseUrl: string): Db {
   return {
     async getRobotIdsForUser(user) {
       const { rows } = await pool.query(
-        `SELECT r.robot_id, r.robot_name
+        `SELECT r.robot_id, r.robot_name, r.hostname
          FROM user_robots ur
          JOIN robots r ON r.robot_id = ur.robot_id
          WHERE user_id = $1`,
@@ -105,8 +110,8 @@ export function createDb(databaseUrl: string): Db {
 
         for (const robot of robots) {
           await client.query(
-            `INSERT INTO robots (robot_id, hostname)
-             VALUES ($1, $2)
+            `INSERT INTO robots (robot_id, hostname, robot_name)
+             VALUES ($1, $2, $2)
              ON CONFLICT (robot_id)
              DO UPDATE SET hostname = EXCLUDED.hostname`,
             [robot.id, robot.hostname]
@@ -135,5 +140,64 @@ export function createDb(databaseUrl: string): Db {
         client.release();
       }
     },
+
+    async addUserToRobot(robotId, userId) {
+      await pool.query(
+        `INSERT INTO user_robots (user_id, robot_id)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, robot_id) DO NOTHING`,
+        [userId, robotId]
+      );
+    },
+
+    async removeUserFromRobot(robotId, userId) {
+      await pool.query(
+        `DELETE FROM user_robots
+        WHERE user_id = $1 AND robot_id = $2`,
+        [userId, robotId]
+      );
+    },
+
+    async getUsersIdsForRobot(robotId) {
+      const { rows } = await pool.query(
+        `SELECT user_id
+        FROM user_robots
+        WHERE robot_id = $1
+        ORDER BY user_id ASC`,
+        [robotId]
+      );
+
+      return rows.map(r => r.user_id);
+    },
+
+    async setUsersForRobot(robotId, userIds) {
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+
+        await client.query(
+          `DELETE FROM user_robots
+          WHERE robot_id = $1`,
+          [robotId]
+        );
+
+        for (const userId of userIds) {
+          await client.query(
+            `INSERT INTO user_robots (user_id, robot_id)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id, robot_id) DO NOTHING`,
+            [userId, robotId]
+          );
+        }
+
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
   };
 }

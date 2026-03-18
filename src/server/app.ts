@@ -13,8 +13,7 @@ import { signPortalApiJWT, fetchPortalApi } from '@/server/portal.js';
 import { createDb, RobotInfo } from '@/server/db.js';
 import { generators } from 'openid-client';
 import { getTelemetryData, subscribeTelemetry } from '@/server/ros.js';
-import { createCognitoAdminService,  } from './cognito-admin.js';
-import { json } from 'node:stream/consumers';
+import { createCognitoAdminService } from './cognito-admin.js';
 
 const log = utils.getLogger('app');
 const FileStore = FileStoreFactory(session);
@@ -217,24 +216,38 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         validitySeconds: 60,
       });
 
+      const robotsRunning = await fetchPortalApi<any>(token, 'https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/', { timeoutMs: 14000 })
+      const runningIds = new Set(Object.keys(robotsRunning || {}));
+
+      const runningRobots = robots.filter((robot) => runningIds.has(robot.id));
+
       const results = await Promise.all(
-        robots.map(async (robot) => {
+        runningRobots.map(async (robot) => {
           const url = `https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/${encodeURIComponent(robot.id)}`;
           const data = await fetchPortalApi<any>(token, url, { timeoutMs: 14000 });
 
-          subscribeTelemetry({
-            jwtSecret: config.jwtSecret,
-            transitiveUser: config.transitiveUser,
-            deviceId: robot.id,
-          }).catch(err => log.error('Battery subscribe failed', err));
+          const hasRosTool = Boolean(
+            data?.['@transitive-robotics']?.['ros-tool']
+          );
+
+          if (hasRosTool) {
+            subscribeTelemetry({
+              jwtSecret: config.jwtSecret,
+              transitiveUser: config.transitiveUser,
+              deviceId: robot.id,
+            }).catch(err => log.error(`Battery subscribe failed for ${robot.id}`, err));
+          }
           
           return { 
             id: robot.id,
             name: robot.name,
+            online: true,
+            hasRosTool,
             ...(data || {})
           };
         })
       );
+
       return res.json(results);
     } catch (err) {
       log.error('Portal API failed on /api/devices', err);
@@ -251,7 +264,6 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   });
 
   app.get('/admin/users', requireAdmin, async (_req, res) => {
-    console.log('Consultando usuarios Cognito...');
     try {
       const users = await cognitoAdmin.listUsers();
       return res.json(users);
@@ -448,9 +460,25 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     }
   });
 
+  app.get('/api/robots', requireLogin, async (req, res) => {
+    const user = req.session.user!._id;
+
+    let robots: RobotInfo[];
+    try {
+      robots = await db.getRobotIdsForUser(user);
+    } catch (err) {
+      log.error('DB failed on /api/devices', err);
+      return res.status(500).json({ error: 'Devices failed' });
+    }
+
+    return res.json(robots);
+  });
+
   app.patch('/api/robots/:robotId/rename', requireLogin, async (req, res) => {
     const userId = req.session.user!._id;
+    const isAdmin = req.session.user!.admin;
     const robotId = req.params.robotId;
+
     const { name } = req.body || {};
 
     if (typeof name !== 'string' || !name.trim()) {
@@ -459,7 +487,8 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
 
     try {
       const robots = await db.getRobotIdsForUser(userId);
-      const hasAcces = robots.some((robot) => robot.id === robotId);
+
+      const hasAcces = isAdmin || robots.some((robot) => robot.id === robotId);
 
       if (!hasAcces) {
         return res.status(403).json({ error: 'Robot not found' })
@@ -475,6 +504,49 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     } catch (err) {
       log.error('Update robot name failed', err);
       return res.status(500).json({ error: 'Update robot name failed' });
+    }
+  });
+
+  app.get('/admin/robots/:robotId/users', requireAdmin, async (req, res) => {
+    const robotId = req.params.robotId;
+
+    try {
+      const userIds = await db.getUsersIdsForRobot(robotId);
+
+      return res.json({
+        robotId,
+        userIds,
+      });
+    } catch (err) {
+      log.error('Get robot users failed', err);
+      return res.status(500).json({ error: 'Get robot users failed' });
+    }
+  });
+
+  app.put('/admin/robots/:robotId/users', requireAdmin, async (req, res) => {
+    const robotId = req.params.robotId;
+    const { userIds } = req.body || {};
+
+    if (!Array.isArray(userIds)) {
+      return res.status(400).json({ error: 'userIds must be an array' });
+    }
+
+    const normalizedUserIds = [...new Set(
+      userIds.filter((u: unknown): u is string => typeof u === 'string' && u.trim().length > 0)
+        .map(u => u.trim().toLowerCase())
+    )];
+
+    try {
+      await db.setUsersForRobot(robotId, normalizedUserIds);
+
+      return res.json({
+        ok: true,
+        robotId,
+        userIds: normalizedUserIds,
+      });
+    } catch (err: any) {
+      log.error('Set robot users failed', err);
+      return res.status(500).json({ error: 'Set robot users failed' });
     }
   });
 
