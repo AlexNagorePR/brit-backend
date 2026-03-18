@@ -94,7 +94,6 @@ export async function subscribeTelemetry(opts: {
             const value = rosTool.deviceData?.ros?.[2]?.messages?.ink_level;
             if (value == null) return;
             cache.inkLevel = value;
-            console.log("Device:", opts.deviceId, "Ink_level:", value);
         }, 'ros/2/messages/ink_level');
 
         rosTool.onData(() => {
