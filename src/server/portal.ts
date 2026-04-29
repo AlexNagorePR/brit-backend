@@ -52,6 +52,33 @@ export function signRosToolJWT(opts: {
   );
 }
 
+export function signHealthMonitoringJWT(opts: {
+  jwtSecret: string;
+  transitiveUser: string;
+  deviceId: string;
+  userId?: string;
+  validitySeconds?: number;
+}) {
+  const {
+    jwtSecret,
+    transitiveUser,
+    deviceId,
+    userId = 'phenomenonrobotics',
+    validitySeconds = 86400,
+  } = opts;
+
+  return jwt.sign(
+    {
+      id: transitiveUser,
+      device: deviceId,
+      capability: '@transitive-robotics/health-monitoring',
+      userId,
+      validity: validitySeconds,
+    },
+    jwtSecret
+  );
+}
+
 export async function fetchPortalApi<T = any>(
   token: string,
   url: string,

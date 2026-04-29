@@ -2,6 +2,8 @@
 import 'express-session';
 import type { AccountLike } from '@/server/auth.js';
 
+declare module '@transitive-sdk/utils';
+
 type OidcPendingEntry = { nonce: string; ts: number };
 
 declare module 'express-session' {

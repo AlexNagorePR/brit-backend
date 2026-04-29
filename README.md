@@ -1,111 +1,698 @@
 
+# brit-backend
+#### Servicio de rastreo de trabajos de robots y recolección de telemetría
 
-# transAct
-#### An open-source robot fleet management dashboard
-by <a href="https://transitiverobotics.com" >
- <img  src="https://transitiverobotics.com/img/logo.svg"  style="height: 20px; vertical-align: text-top;"> Transitive Robotics
- </a>
+Un servicio backend Node.js/TypeScript para recopilar y persistir información de trabajos de robots, telemetría y datos de monitoreo de salud desde dispositivos de Transitive Robotics.
 
+## Descripción General
 
-![Screenshot from 2025-01-22 16-56-03](https://github.com/user-attachments/assets/ddd0c751-d940-4b73-b6ed-0703b01e1ffb)
+brit-backend es un servicio recolector que:
 
-![Screenshot from 2025-01-22 16-55-38](https://github.com/user-attachments/assets/8b2c4068-8aa7-468b-b68a-991b46951f67)
+1. **Se suscribe a tópicos ROS** a través de la capacidad Transitive ROS Tool para recibir datos del robot en tiempo real
+2. **Persiste información de trabajos** incluyendo interrupciones y alarmas en PostgreSQL
+3. **Recopila telemetría** (batería, voltaje, estado, estado de alarma, niveles de tinta, progreso)
+4. **Monitorea la salud del dispositivo** a través de la capacidad de Monitoreo de Salud
+5. **Proporciona APIs REST** para consultar historial de trabajos, estado del dispositivo y diagnósticos de salud
 
+### Características Principales
 
-TransAct is an example of the kinds of robot fleet management dashboards/cloud portals/mission control centers/robot operating centers you can build using Transitive. It serves three purposes:
-
-1. demonstrate how [Transitive](https://github.com/transitiverobotics/transitive) can be used to build web-based robot management systems,
-
-1. demonstrate how to integrate [Transitive Capabilities](https://transitiverobotics.com/caps/) into your own web dashboards, and
-
-1. serve as a reference implementation that we invite you to fork and build on if you are just starting out building your own system.
-
-
-We believe that robotics companies face a [make-vs-buy dilemma](https://transitiverobotics.com/blog/make-vs-buy/) and our mission is to solve this by offering a middle-ground: making it easy for them to build their own fleet management system that perfectly meets their needs.
-
-In the standard configuration it embeds several capabilities:
-- [Remote Teleop](https://transitiverobotics.com/caps/transitive-robotics/remote-teleop/), to control your robot with low-latency video from anywhere in the world,
-- [Terminal](https://transitiverobotics.com/caps/transitive-robotics/terminal/), for web-based shell access,
-- [ROS Tool](https://transitiverobotics.com/caps/transitive-robotics/ros-tool/), for subscribing to ROS topics from the web, used to show robot pose, battery and charging status in our example, and make service calls,
-- [Configuration Management](https://transitiverobotics.com/caps/transitive-robotics/configuration-management/), for editing config files on your fleet hierarchically (with fleet defaults and robot specific overwrites), and
-- [Health Monitoring](https://transitiverobotics.com/caps/transitive-robotics/health-monitoring/), for monitoring device diagnostics and aggregated fleet diagnostics.
+- **Rastreo de Trabajos**: Registra ciclos de trabajo completos con tiempos de inicio/fin, rutas de archivos y tiempos de ejecución
+- **Registro de Interrupciones**: Captura cambios de estado e interrupciones durante ciclos de trabajo con marcas de tiempo precisas
+- **Seguimiento de Alarmas**: Registra advertencias y alarmas con niveles de severidad y detalles de eventos
+- **Deduplicación**: Maneja inteligentemente actualizaciones incompletas del tópico ROS, persistiendo datos solo cuando están completos
+- **Telemetría en Tiempo Real**: Se suscribe a flujos de telemetría del robot (batería, estado, alarmas, etc.)
+- **Diagnósticos de Salud**: Agrega diagnósticos y alertas a nivel de dispositivo
 
 
-## Setup
+## Configuración
 
-### Fork
-We encourage you to [fork this repository](https://github.com/transitiverobotics/transact/fork) and use it as a starting point to build your own dashboard.
+### Requisitos Previos
 
-### Clone
-After forking, clone transAct locally (replace `SUPERBOTS` with your github org)
+- Node.js 18+
+- npm o yarn
+- Base de datos PostgreSQL
+- Cuenta de Transitive Robotics con al menos un dispositivo conectado
 
-    git clone git@github.com:SUPERBOTS/transact.git
+### Instalación
 
-Or you can just clone from this repo directly if you're just taking a look
-
-    git clone git@github.com:transitiverobotics/transact.git
-
-### Configure
-
-Your local transAct deployment will interface with a Transitive deployment to find robots and capabilities.
-
-1. Go to https://portal.transitiverobotics.com and create an account.
-1. In your local transAct clone, copy `sample.env` file to `.env` and edit it:
-   - **TRANSITIVE_USER** set this to your Transitive username, created in Step 1.
-   - **JWT_SECRET** set this to your JWT secret found on your Security page: https://portal.transitiverobotics.com/security.
-1. Run `npm install` to install all dependencies.
-
-### Run
-1. Run `npm run dev` to start transAct locally in dev mode.
-2. Navigate to http://localhost:3000/.
-3. Enjoy!
-
-At first you won't see any robots on your dashboard. This is because you haven't yet added any robots to your Transitive account on transitiverobotics.com. We'll do this next.
-
-## Get some robots
-Follow the [instructions](https://transitiverobotics.com/docs/guides/getting-started/ "Getting started") to add robots to your Transitive account. If you just want to see it working quickly you can use our example Docker image. Go to [fleet page](https://portal.transitiverobotics.com/ "Fleet page"), down to the end of the **Add devices** section and you'll find a command you can grab to run a local Docker robot.
-
-Finally add some capabilities to the devices you've added from the [fleet page](https://portal.transitiverobotics.com/ "Fleet page")
-
-Once these robots show up in the Transitive Portal, they will also appear in your local transAct deployment.
-
-## Configure capabilities
-
-Edit `src/client/config/config.ts` to set the Transitive capabilities you have installed on your robots (e.g., webrtc-video) and the props you want to use for them (see the Embed in the Transitive Portal after you've configured a capability).
-
-## Make it your own!
-The code is yours! A good first step is to find and replace "SuperBots" in the entire project with the name of your own company and change the logo. After that you'll probably want to go through the sections in `src/client/sections` and edit the properties of the embedded Transitive capabilities to fit your needs, e.g., choose the right video sources (cameras, ROS topics, etc.) for webrtc-video and remote-teleop. The easiest way to do this is to go to your Transitive Portal page, open the capability there, configure it, and then get the pre-configured React code from the "Embed" modal.
-
-### UI components
-This project uses [ShadCn](https://ui.shadcn.com/) project for UI components and [Tailwind CSS](https://tailwindcss.com/) for styling.
-You have a lot of beautiful components to choose from in the [ShadCn](https://ui.shadcn.com/docs/components/accordion) collection, you can find instructions on how to use them there, but as an example, if you need a Slider component in your app you just need to:
-
-    npx shadcn@latest add slider
-
-Once it's installed (it just gets copied in the *client/components/ui* folder) you can use it like this:
-
-```jsx
-import { Slider } from "@/components/ui/slider"
-...
-<div>
-  <Label  htmlFor="password"  className="text-xl"> Robot happiness </Label>
-  <Slider id="robot-happiness" defaultValue={[100]} max={100} step={1} />
-</div>
+1. Clonar el repositorio:
+```bash
+git clone git@github.com:transitiverobotics/brit-backend.git
+cd brit-backend
 ```
 
-Note that the `className="text-xl"` is from [tailwindcss](https://tailwindcss.com/docs/font-size).
+2. Instalar dependencias:
+```bash
+npm install
+```
+
+3. Configurar variables de entorno copiando `.env.sample` a `.env`:
+```bash
+cp .env.sample .env
+```
+
+4. Editar `.env` con tus credenciales de Transitive y conexión a la base de datos:
+```env
+# Transitive Robotics
+TRANSITIVE_USER=tu-usuario-transitive
+JWT_SECRET=tu-jwt-secret-del-portal
+
+# Base de datos
+DATABASE_URL=postgresql://user:password@localhost:5432/brit-db
+
+# Servidor
+PORT=3000
+NODE_ENV=development
+
+# Cognito (si usas autenticación OIDC)
+COGNITO_CLIENT_ID=tu-client-id
+COGNITO_CLIENT_SECRET=tu-client-secret
+COGNITO_DOMAIN=tu-dominio.auth.region.amazoncognito.com
+COGNITO_REGION=region
+COGNITO_USER_POOL_ID=region_poolid
+```
+
+5. Inicializar la base de datos:
+```bash
+npm run migrate
+```
+
+### Desarrollo
+
+Ejecutar el servidor de desarrollo con recarga en caliente:
+```bash
+npm run dev
+```
+
+El servidor se iniciará en el PUERTO configurado (por defecto: 3000).
+
+### Producción
+
+Compile e inicie el servidor de producción:
+```bash
+npm run build
+npm start
+```
 
 
-## Getting help
+## Documentación de Endpoints API
 
-Questions? [Join our Slack](https://transitiverobotics.com/slack) and we'll try to help. For suggestions, please open issues or pull-requests.
+Todos los endpoints requieren autenticación OIDC a través de sesión, excepto los de autenticación y health check.
 
+### 🔐 Autenticación
 
------
+#### `GET /auth/login`
+Inicia el flujo de autenticación OIDC.
+- **Autenticación**: No requerida
+- **Respuesta**: Redirección al proveedor OIDC (Cognito)
+- **Códigos de estado**: 302 (Redirección), 500 (OIDC no inicializado)
 
-#### Attribution
+#### `GET /auth/callback`
+Callback de OIDC tras autenticarse en el proveedor.
+- **Autenticación**: No requerida
+- **Parámetros de Query**: `code`, `state`
+- **Respuesta**: Redirección al dashboard si autenticación es exitosa
+- **Códigos de estado**: 302 (Redirección), 400 (Error de OIDC), 500 (Error interno)
 
-SuperBots Logo: <a href="https://www.flaticon.com/free-icons/robot" title="robot icons">Robot icons created by Freepik - Flaticon</a>
+#### `GET /auth/logout`
+Cierra la sesión actual.
+- **Autenticación**: Requerida
+- **Respuesta**: Redirección a página de logout de Cognito
+- **Códigos de estado**: 302 (Redirección)
 
+### 👤 Usuario
 
+#### `GET /api/user`
+Obtiene información del usuario autenticado.
+- **Autenticación**: No requerida (retorna datos del usuario si está autenticado)
+- **Respuesta**:
+```json
+{
+  "isAuthenticated": boolean,
+  "userInfo": {
+    "_id": "string",
+    "email": "string",
+    "admin": boolean,
+    "verified": boolean,
+    "created": "ISO8601"
+  }
+}
+```
+- **Códigos de estado**: 200 (OK)
+
+#### `POST /api/getJWT`
+Obtiene un token JWT para acceder a capacidades de Transitive.
+- **Autenticación**: Requerida (login)
+- **Cuerpo de solicitud**:
+```json
+{
+  "capability": "string"  // Ej: "ros-tool", "health-monitoring"
+}
+```
+- **Respuesta**:
+```json
+{
+  "token": "JWT signed token"
+}
+```
+- **Códigos de estado**: 200 (OK), 400 (Capacidad no permitida)
+
+### 🏥 Salud y Monitoreo
+
+#### `GET /api/health`
+Health check del servicio.
+- **Autenticación**: No requerida
+- **Respuesta**:
+```json
+{
+  "status": "ok",
+  "timestamp": "ISO8601"
+}
+```
+- **Códigos de estado**: 200 (OK)
+
+#### `GET /api/health-monitoring/:deviceId`
+Obtiene diagnósticos de salud de un dispositivo.
+- **Autenticación**: Requerida (login)
+- **Parámetros de ruta**: `deviceId` (string)
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "data": {
+    "deviceId": "string",
+    "version": "string",
+    "lastUpdateAt": "ISO8601",
+    "diagnostics": {
+      "diagnostic_name": {
+        "level": number,
+        "message": "string",
+        "hardwareId": "string",
+        "values": {}
+      }
+    }
+  }
+}
+```
+- **Códigos de estado**: 200 (OK), 500 (Error interno)
+
+### 🤖 Dispositivos y Robots
+
+#### `GET /api/devices`
+Lista dispositivos de robots conectados del usuario.
+- **Autenticación**: Requerida (login)
+- **Respuesta**: Array de robots con telemetría
+```json
+[
+  {
+    "id": "device-id",
+    "name": "robot-name",
+    "online": true,
+    "hasRosTool": boolean,
+    "@transitive-robotics": { /* datos de portal */ }
+  }
+]
+```
+- **Códigos de estado**: 200 (OK), 500 (Error BD), 502 (Error API Portal)
+
+#### `GET /api/data/:deviceId`
+Obtiene telemetría actual de un dispositivo.
+- **Autenticación**: Requerida (login)
+- **Parámetros de ruta**: `deviceId` (string)
+- **Respuesta**:
+```json
+{
+  "deviceId": "string",
+  "telemetry": {
+    "battery": number,
+    "voltage": number,
+    "state": "string",
+    "alarm": number,
+    "inkLevel": "string",
+    "topconBattery": number,
+    "leicaBatteryPercentage": number,
+    "progress": number,
+    "lastUpdateAt": "ISO8601"
+  }
+}
+```
+- **Códigos de estado**: 200 (OK)
+
+#### `GET /api/robots`
+Lista robots accesibles por el usuario actual.
+- **Autenticación**: Requerida (login)
+- **Respuesta**: Array de robots
+```json
+[
+  {
+    "id": "string",
+    "clientId": "string",
+    "hostName": "string",
+    "robotName": "string",
+    "userEmails": ["string"],
+    "deliveryDate": "ISO8601",
+    "lastMaint": "ISO8601",
+    "lastClean": "ISO8601",
+    "lastWork": "ISO8601",
+    "works": number,
+    "timeOn": number,
+    "timeWork": number
+  }
+]
+```
+- **Códigos de estado**: 200 (OK), 500 (Error BD)
+
+#### `PATCH /api/robots/:robotId/rename`
+Renombra un robot.
+- **Autenticación**: Requerida (login o admin)
+- **Parámetros de ruta**: `robotId` (string)
+- **Cuerpo de solicitud**:
+```json
+{
+  "name": "nuevo-nombre"
+}
+```
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "robotId": "string",
+  "name": "string"
+}
+```
+- **Códigos de estado**: 200 (OK), 400 (Validación), 403 (No autorizado), 500 (Error)
+
+### 👨‍💼 Administración de Usuarios (requiere `admin`)
+
+#### `GET /admin/users`
+Lista usuarios de Cognito y sincroniza con BD.
+- **Autenticación**: Requerida (admin)
+- **Respuesta**:
+```json
+{
+  "cognitoUsers": [ /* usuarios de Cognito */ ],
+  "dbUsers": [ /* usuarios de BD */ ],
+  "synced": true
+}
+```
+- **Códigos de estado**: 200 (OK), 502 (Error Cognito)
+
+#### `GET /admin/db-users`
+Lista todos los usuarios de la base de datos.
+- **Autenticación**: Requerida (admin)
+- **Respuesta**:
+```json
+{
+  "count": number,
+  "users": [
+    {
+      "id": "string",
+      "email": "string",
+      "clientId": "string"
+    }
+  ]
+}
+```
+- **Códigos de estado**: 200 (OK), 500 (Error)
+
+#### `POST /admin/users/sync`
+Sincroniza usuarios de Cognito a la BD manualmente.
+- **Autenticación**: Requerida (admin)
+- **Cuerpo**: Vacío
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "count": number,
+  "users": [ /* usuarios sincronizados */ ]
+}
+```
+- **Códigos de estado**: 200 (OK), 502 (Error sincronización)
+
+#### `POST /admin/users`
+Crea un nuevo usuario en Cognito.
+- **Autenticación**: Requerida (admin)
+- **Cuerpo de solicitud**:
+```json
+{
+  "email": "user@example.com",
+  "givenName": "John",
+  "familyName": "Doe",
+  "temporaryPassword": "TempPass123!",
+  "groups": ["allowed", "admin"],
+  "clientId": "client-id"
+}
+```
+- **Respuesta**: Objeto de usuario creado
+- **Códigos de estado**: 201 (Creado), 400 (Validación), 502 (Error Cognito)
+
+#### `GET /admin/users/:username`
+Obtiene información de un usuario específico.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `username` (string)
+- **Respuesta**: Objeto de usuario de Cognito
+- **Códigos de estado**: 200 (OK), 404 (No encontrado), 502 (Error Cognito)
+
+#### `POST /admin/users/:username/groups`
+Actualiza los grupos de un usuario.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `username` (string)
+- **Cuerpo de solicitud**:
+```json
+{
+  "groups": ["allowed", "admin"]
+}
+```
+- **Respuesta**: Usuario actualizado
+- **Códigos de estado**: 200 (OK), 400 (Validación), 502 (Error Cognito)
+
+#### `POST /admin/users/:username/disable`
+Deshabilita un usuario.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `username` (string)
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "username": "string",
+  "enabled": false
+}
+```
+- **Códigos de estado**: 200 (OK), 404 (No encontrado), 502 (Error Cognito)
+
+#### `POST /admin/users/:username/enable`
+Habilita un usuario.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `username` (string)
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "username": "string",
+  "enabled": true
+}
+```
+- **Códigos de estado**: 200 (OK), 404 (No encontrado), 502 (Error Cognito)
+
+#### `PATCH /admin/users/:username/client`
+Asigna un cliente a un usuario.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `username` (string)
+- **Cuerpo de solicitud**:
+```json
+{
+  "clientName": "client-name"  // O null para remover
+}
+```
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "username": "string",
+  "userId": "string",
+  "email": "string",
+  "clientId": "string",
+  "clientName": "string"
+}
+```
+- **Códigos de estado**: 200 (OK), 400 (Validación), 404 (No encontrado), 500 (Error)
+
+#### `DELETE /admin/users/:username`
+Elimina un usuario (de Cognito y BD).
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `username` (string)
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "username": "string"
+}
+```
+- **Códigos de estado**: 200 (OK), 400 (No puede eliminarse a sí mismo), 502 (Error Cognito)
+
+#### `GET /admin/users/:clientName`
+Obtiene usuarios de un cliente específico.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `clientName` (string)
+- **Respuesta**:
+```json
+{
+  "clientId": "string",
+  "clientName": "string",
+  "users": [ /* usuarios del cliente */ ]
+}
+```
+- **Códigos de estado**: 200 (OK), 404 (Cliente no encontrado), 500 (Error)
+
+### 🤖 Administración de Robots (requiere `admin`)
+
+#### `POST /admin/robots/sync`
+Sincroniza robots del Portal de Transitive a la BD.
+- **Autenticación**: Requerida (admin)
+- **Cuerpo**: Vacío
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "count": number,
+  "robots": [ /* robots sincronizados */ ]
+}
+```
+- **Códigos de estado**: 200 (OK), 502 (Error Portal API)
+
+#### `GET /admin/robots`
+Lista todos los robots en la BD.
+- **Autenticación**: Requerida (admin)
+- **Respuesta**: Array de robots
+- **Códigos de estado**: 200 (OK), 500 (Error)
+
+#### `GET /admin/robots/:robotId/users`
+Obtiene usuarios asignados a un robot.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `robotId` (string)
+- **Respuesta**:
+```json
+{
+  "robotId": "string",
+  "userIds": ["string"]
+}
+```
+- **Códigos de estado**: 200 (OK), 500 (Error)
+
+#### `PUT /admin/robots/:robotId/users`
+Asigna usuarios a un robot.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `robotId` (string)
+- **Cuerpo de solicitud**:
+```json
+{
+  "userIds": ["user-id-1", "user-id-2"]
+}
+```
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "robotId": "string",
+  "userIds": ["string"]
+}
+```
+- **Códigos de estado**: 200 (OK), 400 (Validación), 500 (Error)
+
+#### `PATCH /admin/robots/:robotId/client`
+Asigna un cliente a un robot.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `robotId` (string)
+- **Cuerpo de solicitud**:
+```json
+{
+  "clientName": "client-name"  // O null para remover
+}
+```
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "robotId": "string",
+  "clientId": "string",
+  "clientName": "string"
+}
+```
+- **Códigos de estado**: 200 (OK), 400 (Validación), 404 (No encontrado), 500 (Error)
+
+### 🏢 Administración de Clientes (requiere `admin`)
+
+#### `GET /admin/clients`
+Lista todos los clientes.
+- **Autenticación**: Requerida (admin)
+- **Respuesta**:
+```json
+[
+  {
+    "id": "string",
+    "name": "string"
+  }
+]
+```
+- **Códigos de estado**: 200 (OK), 500 (Error)
+
+#### `POST /admin/clients`
+Crea un nuevo cliente.
+- **Autenticación**: Requerida (admin)
+- **Cuerpo de solicitud**:
+```json
+{
+  "name": "nombre-cliente"
+}
+```
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "id": "string",
+  "name": "string"
+}
+```
+- **Códigos de estado**: 201 (Creado), 400 (Validación), 500 (Error)
+
+#### `GET /admin/clients/:id`
+Obtiene información de un cliente específico.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `id` (string)
+- **Respuesta**:
+```json
+{
+  "id": "string",
+  "name": "string"
+}
+```
+- **Códigos de estado**: 200 (OK), 404 (No encontrado), 500 (Error)
+
+#### `DELETE /admin/clients/:id`
+Elimina un cliente.
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `id` (string)
+- **Respuesta**:
+```json
+{
+  "ok": true,
+  "id": "string"
+}
+```
+- **Códigos de estado**: 200 (OK), 404 (No encontrado), 500 (Error)
+
+### 📊 Utilidad
+
+#### `GET /`
+Endpoint raíz - información del servicio.
+- **Autenticación**: No requerida
+- **Respuesta**:
+```json
+{
+  "service": "transact-backend",
+  "status": "running",
+  "timestamp": "ISO8601"
+}
+```
+- **Códigos de estado**: 200 (OK)
+
+### Pruebas
+
+Ejecutar la suite de pruebas:
+```bash
+npm test              # Ejecutar todas las pruebas una vez
+npm run test:watch   # Ejecutar pruebas en modo watch
+```
+
+## Arquitectura
+
+### Estructura del Proyecto
+
+```
+src/
+├── server/
+│   ├── app.ts                 # Configuración de la aplicación Express
+│   ├── main.ts                # Punto de entrada
+│   ├── auth.ts                # Middleware de autenticación
+│   ├── config.ts              # Gestión de configuración
+│   ├── db.ts                  # Cliente de base de datos y consultas
+│   ├── brit-info-work.ts      # Controlador de suscripción de info de trabajo
+│   ├── telemetry.ts           # Recopilación de telemetría
+│   ├── health-monitoring.ts   # Monitoreo de salud
+│   ├── collector.ts           # Servicio principal recolector
+│   ├── portal.ts              # API de Transitive Portal
+│   └── cognito-admin.ts       # Operaciones admin de Cognito
+└── lib/
+    └── utils.ts               # Funciones utilitarias
+
+test/
+├── brit-info-work.test.ts
+├── brit-info-work-persistence.test.ts
+└── ... otras pruebas
+```
+
+### Flujo de Datos
+
+1. **Suscripción**: El recolector se suscribe a tópicos ROS en dispositivos conectados
+2. **Recepción de Mensajes**: Los mensajes de Brit Info Work llegan incrementalmente en el tópico `/brit_info_work`
+3. **Acumulación**: Los mensajes se acumulan en caché hasta que el snapshot de trabajo esté completo
+4. **Persistencia**: Una vez completo (con end_time y todos los campos requeridos), el trabajo se inserta en la BD
+5. **Registros Hijo**: Las interrupciones y advertencias se analizan e insertan como filas separadas
+6. **Deduplicación**: Las actualizaciones repetidas del tópico con la misma clave de trabajo no crean registros de BD duplicados
+
+### Esquema de Base de Datos
+
+Tablas principales:
+- `work` - Ciclos de trabajo de robots con tiempos de inicio/fin, duraciones, rutas de archivos
+- `interruption` - Cambios de estado e interrupciones de trabajo con marcas de tiempo
+- `warning` - Alarmas y advertencias con niveles de severidad
+- `robot` - Dispositivos de robots conectados
+- `battery` - Información de batería para dispositivos rastreados
+
+### Mapeo de Datos de Brit Info Work
+
+Los mensajes del tópico ROS `/brit_info_work` se mapean a registros de base de datos:
+
+| Campo del Tópico | Tabla BD | Columna | Notas |
+|-------------|----------|--------|-------|
+| `start_time` | work | start_time | Marca de tiempo ISO |
+| `end_time` | work | end_time | Indica finalización del trabajo |
+| `json_file_path` | work | file_path | Ruta al archivo de datos del trabajo |
+| `estimated_time` | work | estimated_time | Segundos |
+| `total_time` | work | total_time | Tiempo de ejecución real |
+| `interruptions_count` / `interruption_count` | work | interruptions | Nombre de campo normalizado |
+| `warnings_count` / `warnings_count` | work | alarms | Asignado a columna de alarmas |
+| `interruptions_detail[].new_state` | interruption | state_code | Código de transición de estado |
+| `interruptions_detail[].time_from_start` | interruption | event_time | Tiempo relativo desde el inicio |
+| `warnings_detail[].level` | warning | alarm_code | Nivel de severidad de alarma |
+| `warnings_detail[].time_from_start` | warning | event_time | Tiempo relativo desde el inicio |
+
+**Nota**: Los mensajes del tópico llegan incrementalmente. El controlador acumula campos hasta que todos los campos requeridos (`start_time`, `json_file_path`, `estimated_time`, `total_time`, `end_time`) estén presentes, luego inserta un único registro de trabajo y todas las interrupciones/advertencias asociadas.
+
+## Desarrollo
+
+### Ejecutar Pruebas
+
+```bash
+npm test                                    # Ejecutar todas las pruebas
+npm test -- --run test/brit-info-work.test.ts  # Ejecutar archivo de prueba específico
+npm run test:watch                          # Modo watch
+```
+
+### Estilo de Código
+
+Este proyecto utiliza ESLint y TypeScript. Formatea y lint tu código:
+
+```bash
+npx eslint src/
+npx tsc --noEmit
+```
+
+### Servicios Principales
+
+- **Collector**: Servicio principal que orquesta todas las suscripciones y recopilación de datos
+- **BritInfoWork Handler**: Gestiona suscripciones de tópico ROS `/brit_info_work`
+- **Telemetry**: Recopila telemetría de robots en tiempo real
+- **HealthMonitoring**: Se suscribe a diagnósticos de salud de dispositivos desde MQTT
+- **Database**: Capa de persistencia PostgreSQL
 

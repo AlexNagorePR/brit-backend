@@ -12,11 +12,17 @@ import { login, requireAdmin, requireLogin } from '@/server/auth.js';
 import { signPortalApiJWT, fetchPortalApi } from '@/server/portal.js';
 import { createDb, RobotInfo } from '@/server/db.js';
 import { generators } from 'openid-client';
-import { getTelemetryData, subscribeTelemetry } from '@/server/ros.js';
+import { getTelemetryData, subscribeTelemetry } from '@/server/telemetry.js';
 import { createCognitoAdminService } from './cognito-admin.js';
+import {
+  getHealthMonitoringSnapshot
+} from '@/server/health-monitoring.js';
+import { createCollector, getCollector } from '@/server/collector.js';
 
 const log = utils.getLogger('app');
 const FileStore = FileStoreFactory(session);
+
+const defaultClientId = "00544dc1-fd10-4a48-a34a-7f1f75a383e2";
 
 type OidcClientLike = {
   authorizationUrl(args: any): string;
@@ -43,6 +49,14 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
 
   const db = createDb(config.databaseUrl);
 
+  const collector = createCollector({
+    db,
+    jwtSecret: config.jwtSecret,
+    transitiveUser: config.transitiveUser,
+  });
+
+  collector.start().catch(err => log.error('Collector failed to start', err));
+
   const cognitoAdmin = createCognitoAdminService({
     region: config.cognitoRegion,
     userPoolId: config.cognitoUserPoolId,
@@ -56,7 +70,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       resave: false,
       saveUninitialized: false,
       proxy: isProd,
-      cookie:{
+      cookie: {
         maxAge: 3 * 24 * 60 * 60 * 1000,
         httpOnly: true,
         sameSite: isProd ? 'lax' : 'lax',
@@ -137,7 +151,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         });
       }
 
-      const email = claims.email as string | undefined;
+      const email = claims.email as string;
       const userId = email || (claims.sub as string);
 
       const accountLike = {
@@ -198,12 +212,25 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     return res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  app.get('/api/health-monitoring/:deviceId', requireLogin, async (req, res) => {
+    const deviceId = req.params.deviceId;
+
+    const data = getHealthMonitoringSnapshot(deviceId);
+
+    return res.json({
+      ok: true,
+      data,
+    });
+  });
+
   app.get('/api/devices', requireLogin, async (req, res) => {
-    const user = req.session.user!._id;
+    const userEmail = req.session.user!.email!;
+
+    console.log('Fetching devices for user', userEmail);
 
     let robots: RobotInfo[];
     try {
-      robots = await db.getRobotIdsForUser(user);
+      robots = await db.getRobotIdsForUser(userEmail);
     } catch (err) {
       log.error('DB failed on /api/devices', err);
       return res.status(500).json({ error: 'Devices failed' });
@@ -237,10 +264,10 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
               deviceId: robot.id,
             }).catch(err => log.error(`Battery subscribe failed for ${robot.id}`, err));
           }
-          
-          return { 
+
+          return {
             id: robot.id,
-            name: robot.name,
+            name: robot.robotName,
             online: true,
             hasRosTool,
             ...(data || {})
@@ -265,30 +292,113 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
 
   app.get('/admin/users', requireAdmin, async (_req, res) => {
     try {
-      const users = await cognitoAdmin.listUsers();
-      return res.json(users);
+      log.info('Fetching Cognito users...');
+      const cognitoUsers = await cognitoAdmin.listUsers();
+      log.info(`Fetched ${cognitoUsers.length} users from Cognito`);
+
+      const usersToSync = cognitoUsers
+        .filter((u: any) => u.username && u.attributes?.email)
+        .map((u: any) => ({ username: u.username, email: u.attributes.email }));
+
+      log.info(`Syncing ${usersToSync.length} users to database`, { users: usersToSync });
+
+      try {
+        await db.syncCognitoUsers(usersToSync);
+        log.info('Users synced to database successfully');
+      } catch (syncErr) {
+        log.error('Failed to sync users to database', { error: syncErr });
+        // Don't fail the response, still return Cognito users even if sync fails
+      }
+
+      // Also get users from DB to return enriched data
+      let dbUsers: any[] = [];
+      try {
+        dbUsers = await db.getUsersByClient(defaultClientId);
+        log.info(`Fetched ${dbUsers.length} users from database for client ${defaultClientId}`);
+      } catch (dbErr) {
+        log.error('Failed to fetch users from database', { error: dbErr });
+      }
+
+      return res.json({
+        cognitoUsers,
+        dbUsers,
+        synced: true,
+      });
     } catch (err) {
-      log.error('Cognito list users failed', err);
+      log.error('Get users failed', { error: err });
       return res.status(502).json({ error: 'List users failed' });
     }
   });
 
+  app.get('/admin/db-users', requireAdmin, async (req, res) => {
+    try {
+      log.info('Fetching all users from database');
+      
+      const users = await db.getAllUsers();
+      log.info(`Fetched ${users.length} users from database`, { users });
+
+      return res.json({
+        count: users.length,
+        users,
+      });
+    } catch (err) {
+      log.error('Get database users failed', { error: err });
+      return res.status(500).json({ error: 'Failed to fetch database users' });
+    }
+  });
+
+  app.post('/admin/users/sync', requireAdmin, async (_req, res) => {
+    log.info('Manual sync request for users');
+    try {
+      log.info('Fetching all users from Cognito...');
+      const cognitoUsers = await cognitoAdmin.listUsers();
+      log.info(`Fetched ${cognitoUsers.length} users from Cognito`, {
+        users: cognitoUsers.map((u: any) => ({ username: u.username, email: u.attributes?.email })),
+      });
+
+      const usersToSync = cognitoUsers
+        .filter((u: any) => u.username && u.attributes?.email)
+        .map((u: any) => ({ username: u.username, email: u.attributes.email }));
+
+      log.info(`Extracted ${usersToSync.length} users from Cognito`, { users: usersToSync });
+
+      log.info(`Syncing to database`);
+      await db.syncCognitoUsers(usersToSync);
+      log.info('Sync completed successfully');
+
+      return res.json({
+        ok: true,
+        count: usersToSync.length,
+        users: usersToSync,
+      });
+    } catch (err) {
+      log.error('User sync failed', { error: err, stack: err instanceof Error ? err.stack : undefined });
+      return res.status(502).json({ error: 'User sync failed' });
+    }
+  });
+
   app.post('/admin/users', requireAdmin, async (req, res) => {
-    const { email, groups, temporaryPassword, givenName, familyName } = req.body || {};
+    const { email, groups, temporaryPassword, givenName, familyName, clientId } = req.body || {};
+
+    console.log('Create user request', { email, groups, givenName, familyName, clientId });
+    log.info('Create user request', { email, groups, givenName, familyName, clientId });
 
     if (!email) {
+      log.warn('Create user failed: email is required');
       return res.status(400).json({
         error: 'email is required',
       });
     }
 
     if (groups && !Array.isArray(groups)) {
+      log.warn('Create user failed: groups must be array', { groups });
       return res.status(400).json({
         error: 'groups must be an array of strings',
       });
     }
 
     try {
+      log.info('Creating user in Cognito', { email });
       const user = await cognitoAdmin.createUser({
         email,
         temporaryPassword,
@@ -296,17 +406,19 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         familyName,
         groups,
       });
+      log.info('User created in Cognito successfully', { email });
 
-      await db.createUser(email);
+      await db.createUser(user.username, email, clientId);
+      log.info('User created in database successfully', { email, clientId });
 
       return res.status(201).json(user);
     } catch (err) {
-      log.error('Cognito create user failed', err);
+      log.error('Create user failed', { email, error: err, stack: err instanceof Error ? err.stack : undefined });
       return res.status(502).json({ error: 'Create user failed' });
     }
   });
 
-  app.get('/admin/users/:username', requireAdmin, async(req, res) => {
+  app.get('/admin/users/:username', requireAdmin, async (req, res) => {
     try {
       const user = await cognitoAdmin.getUser(req.params.username);
       return res.json(user);
@@ -397,9 +509,63 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     }
   });
 
+  app.patch('/admin/users/:username/client', requireAdmin, async (req, res) => {
+    const username = req.params.username;
+    const { clientName } = req.body || {};
+
+    log.info('Patch user client request', { username, clientName });
+
+    if (clientName !== null && clientName !== undefined && typeof clientName !== 'string') {
+      return res.status(400).json({ error: 'clientName must be a string or null' });
+    }
+
+    try {
+      const user = await db.getUserById(username);
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found in database' });
+      }
+
+      // 🔹 Si viene clientName → buscar client
+      if (clientName) {
+        const client = await db.getClientByName(clientName);
+
+        if (!client) {
+          return res.status(404).json({ error: 'Client not found' });
+        }
+
+        await db.updateUserClient(user.id, client.id);
+
+        return res.json({
+          ok: true,
+          username,
+          userId: user.id,
+          email: user.email,
+          clientId: client.id,
+          clientName: client.name,
+        });
+      }
+
+      // 🔹 Si viene null → quitar cliente
+      await db.updateUserClient(user.id, null as any);
+
+      return res.json({
+        ok: true,
+        username,
+        userId: user.id,
+        email: user.email,
+        clientId: null,
+        clientName: null,
+      });
+    } catch (err) {
+      log.error('Update user client failed', { username, clientName, error: err });
+      return res.status(500).json({ error: 'Update user client failed' });
+    }
+  });
+
   app.delete('/admin/users/:username', requireAdmin, async (req, res) => {
     const username = req.params.username;
-    
+
     if (req.session.user?.email === username) {
       return res.status(400).json({
         error: 'cannot_delete_self'
@@ -418,6 +584,29 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     }
   })
 
+  app.get('/admin/users/:clientName', requireAdmin, async (req, res) => {
+    const clientName = req.params.clientName;
+
+    try {
+      const client = await db.getClientByName(clientName);
+
+      if (!client) {
+        return res.status(404).json({ error: 'Client not found' });
+      }
+
+      const users = await db.getUsersByClient(client.id);
+
+      return res.json({
+        clientId: client.id,
+        clientName: client.name,
+        users,
+      });
+    } catch (err) {
+      log.error('Get users for client failed', err);
+      return res.status(500).json({ error: 'Get users for client failed' });
+    }
+  });
+
   app.post('/admin/robots/sync', requireAdmin, async (_req, res) => {
     try {
       const token = signPortalApiJWT({
@@ -433,11 +622,14 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         .filter(([, value]: [string, any]) => value!.os?.hostname)
         .map(([id, value]: [string, any]) => ({
           id,
-          hostname: value.os.hostname,
-        })
-      );
+          clientId: defaultClientId,
+          hostName: value.os.hostname,
+          robotName: value.os.hostname,
+        }));
 
-      await db.syncRobotsSnapshot(robots);
+      console.log('Syncing robots from portal', robots);
+
+      await db.syncRobotsSnapshot(defaultClientId, robots);
 
       return res.json({
         ok: true,
@@ -453,6 +645,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   app.get('/admin/robots', requireAdmin, async (_req, res) => {
     try {
       const robots = await db.getAllRobots();
+      console.log('Fetched all robots for admin', robots);
       return res.json(robots);
     } catch (err) {
       log.error('List robots failed', err);
@@ -461,11 +654,11 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   });
 
   app.get('/api/robots', requireLogin, async (req, res) => {
-    const user = req.session.user!._id;
+    const userEmail = req.session.user!.email!;
 
     let robots: RobotInfo[];
     try {
-      robots = await db.getRobotIdsForUser(user);
+      robots = await db.getRobotIdsForUser(userEmail);
     } catch (err) {
       log.error('DB failed on /api/devices', err);
       return res.status(500).json({ error: 'Devices failed' });
@@ -475,7 +668,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
   });
 
   app.patch('/api/robots/:robotId/rename', requireLogin, async (req, res) => {
-    const userId = req.session.user!._id;
+    const userEmail = req.session.user!.email!;
     const isAdmin = req.session.user!.admin;
     const robotId = req.params.robotId;
 
@@ -486,7 +679,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     }
 
     try {
-      const robots = await db.getRobotIdsForUser(userId);
+      const robots = await db.getRobotIdsForUser(userEmail);
 
       const hasAcces = isAdmin || robots.some((robot) => robot.id === robotId);
 
@@ -511,7 +704,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     const robotId = req.params.robotId;
 
     try {
-      const userIds = await db.getUsersIdsForRobot(robotId);
+      const userIds = await db.getUsersForRobot(robotId);
 
       return res.json({
         robotId,
@@ -536,6 +729,8 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         .map(u => u.trim().toLowerCase())
     )];
 
+    console.log(`Setting users for robot ${robotId}:`, normalizedUserIds);
+
     try {
       await db.setUsersForRobot(robotId, normalizedUserIds);
 
@@ -547,6 +742,117 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     } catch (err: any) {
       log.error('Set robot users failed', err);
       return res.status(500).json({ error: 'Set robot users failed' });
+    }
+  });
+
+  app.patch('/admin/robots/:robotId/client', requireAdmin, async (req, res) => {
+    const robotId = req.params.robotId;
+    const { clientName } = req.body || {};
+
+    if (clientName !== null && clientName !== undefined && typeof clientName !== 'string') {
+      return res.status(400).json({ error: 'clientName must be a string or null' });
+    }
+
+    try {
+      if (!clientName) {
+        await db.updateRobotClient(robotId, null);
+
+        return res.json({
+          ok: true,
+          robotId,
+          clientId: null,
+          clientName: null,
+        });
+      }
+
+      const client = await db.getClientByName(clientName);
+
+      if (!client) {
+        return res.status(404).json({ error: 'Client not found' });
+      }
+
+      await db.updateRobotClient(robotId, client.id);
+
+      return res.json({
+        ok: true,
+        robotId,
+        clientId: client.id,
+        clientName: client.name,
+      });
+    } catch (err) {
+      log.error('Update robot client failed', { robotId, clientName, error: err });
+      return res.status(500).json({ error: 'Update robot client failed' });
+    }
+  });
+
+  // Client operations
+  app.get('/admin/clients', requireAdmin, async (_req, res) => {
+    try {
+      const clients = await db.getAllClients();
+      return res.json(clients);
+    } catch (err) {
+      log.error('List clients failed', err);
+      return res.status(500).json({ error: 'List clients failed' });
+    }
+  });
+
+  app.post('/admin/clients', requireAdmin, async (req, res) => {
+    const { name } = req.body || {};
+
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({
+        error: 'name is required and must be a non-empty string',
+      });
+    }
+
+    try {
+      const clientId = await db.createClient(name.trim());
+      return res.status(201).json({
+        ok: true,
+        id: clientId,
+        name: name.trim(),
+      });
+    } catch (err) {
+      log.error('Create client failed', err);
+      return res.status(500).json({ error: 'Create client failed' });
+    }
+  });
+
+  app.get('/admin/clients/:id', requireAdmin, async (req, res) => {
+    const clientId = req.params.id;
+
+    try {
+      const client = await db.getClient(clientId);
+      
+      if (!client) {
+        return res.status(404).json({ error: 'Client not found' });
+      }
+
+      return res.json(client);
+    } catch (err) {
+      log.error('Get client failed', err);
+      return res.status(500).json({ error: 'Get client failed' });
+    }
+  });
+
+  app.delete('/admin/clients/:id', requireAdmin, async (req, res) => {
+    const clientId = req.params.id;
+
+    try {
+      const client = await db.getClient(clientId);
+      
+      if (!client) {
+        return res.status(404).json({ error: 'Client not found' });
+      }
+
+      await db.deleteClient(clientId);
+      return res.json({
+        ok: true,
+        id: clientId,
+      });
+    } catch (err) {
+      log.error('Delete client failed', err);
+      return res.status(500).json({ error: 'Delete client failed' });
     }
   });
 

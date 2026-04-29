@@ -37,6 +37,16 @@ vi.mock('@/server/portal.js', () => ({
   fetchPortalApi: vi.fn(),
 }));
 
+vi.mock('@/server/collector.js', () => ({
+  createCollector: () => ({
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn(),
+    refreshRobots: vi.fn(),
+    getStatus: vi.fn(),
+  }),
+  getCollector: vi.fn(() => null),
+}));
+
 describe('Admin robots sync', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,17 +80,40 @@ describe('Admin robots sync', () => {
     expect(fetchPortalApi).toHaveBeenCalledTimes(1);
 
     expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledTimes(1);
-    expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledWith([
-      { id: 'd_robot1', hostname: 'robot1' },
-      { id: 'd_robot2', hostname: 'robot2' },
-    ]);
+    expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledWith(
+      '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+      [
+        {
+          id: 'd_robot1',
+          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+          hostName: 'robot1',
+          robotName: 'robot1',
+        },
+        {
+          id: 'd_robot2',
+          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+          hostName: 'robot2',
+          robotName: 'robot2',
+        },
+      ]
+    );
 
     expect(res.body).toEqual({
       ok: true,
       count: 2,
       robots: [
-        { id: 'd_robot1', hostname: 'robot1' },
-        { id: 'd_robot2', hostname: 'robot2' },
+        {
+          id: 'd_robot1',
+          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+          hostName: 'robot1',
+          robotName: 'robot1',
+        },
+        {
+          id: 'd_robot2',
+          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+          hostName: 'robot2',
+          robotName: 'robot2',
+        },
       ],
     });
   });

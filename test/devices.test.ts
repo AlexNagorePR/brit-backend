@@ -30,6 +30,16 @@ vi.mock('@/server/portal.js', () => ({
   fetchPortalApi: vi.fn(),
 }));
 
+vi.mock('@/server/collector.js', () => ({
+  createCollector: () => ({
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn(),
+    refreshRobots: vi.fn(),
+    getStatus: vi.fn(),
+  }),
+  getCollector: vi.fn(() => null),
+}));
+
 describe('Devices', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -37,13 +47,17 @@ describe('Devices', () => {
 
   it('GET /api/devices maps portal object into array with id', async () => {
     mockDb.getRobotIdsForUser.mockResolvedValue([
-      { id: 'd1', name: 'Robot 1' },
-      { id: 'd2', name: 'Robot 2' },
+      { id: 'd1', robotName: 'Robot 1' },
+      { id: 'd2', robotName: 'Robot 2' },
     ]);
 
     (fetchPortalApi as any)
-      .mockResolvedValueOnce({ running: true})
-      .mockResolvedValueOnce({ running: false});
+      .mockResolvedValueOnce({
+        d1: {
+          '@transitive-robotics': {},
+        },
+      })
+      .mockResolvedValueOnce({});
 
     const app = createApp({
       oidcClient: { authorizationUrl: () => 'http://example/redirect' } as any,
@@ -56,8 +70,7 @@ describe('Devices', () => {
     expect(fetchPortalApi).toHaveBeenCalledTimes(2);
 
     expect(res.body).toEqual([
-      { id: 'd1', running: true, name: 'Robot 1' },
-      { id: 'd2', running: false, name: 'Robot 2' },
+      { id: 'd1', name: 'Robot 1', online: true, hasRosTool: false },
     ]);
   });
 
@@ -73,8 +86,8 @@ describe('Devices', () => {
   });
 
   it('GET /api/devices returns 502 if Portal API fails', async () => {
-    mockDb.getRobotIdsForUser.mockResolvedValue(['d1']);
-    (fetchPortalApi as any).mockRejectedValue(new Error('portal boom'));
+    mockDb.getRobotIdsForUser.mockResolvedValue([{ id: 'd1', robotName: 'Robot 1' }]);
+    (fetchPortalApi as any).mockRejectedValueOnce(new Error('portal boom'));
 
     const app = createApp({
       oidcClient: { authorizationUrl: () => 'http://example/redirect' } as any,
