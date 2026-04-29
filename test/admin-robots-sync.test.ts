@@ -81,17 +81,17 @@ describe('Admin robots sync', () => {
 
     expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledTimes(1);
     expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledWith(
-      '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+      null,
       [
         {
           id: 'd_robot1',
-          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+          clientId: undefined,
           hostName: 'robot1',
           robotName: 'robot1',
         },
         {
           id: 'd_robot2',
-          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
+          clientId: undefined,
           hostName: 'robot2',
           robotName: 'robot2',
         },
@@ -104,13 +104,11 @@ describe('Admin robots sync', () => {
       robots: [
         {
           id: 'd_robot1',
-          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
           hostName: 'robot1',
           robotName: 'robot1',
         },
         {
           id: 'd_robot2',
-          clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
           hostName: 'robot2',
           robotName: 'robot2',
         },

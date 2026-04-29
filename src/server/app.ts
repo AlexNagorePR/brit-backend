@@ -22,8 +22,6 @@ import { createCollector, getCollector } from '@/server/collector.js';
 const log = utils.getLogger('app');
 const FileStore = FileStoreFactory(session);
 
-const defaultClientId = "00544dc1-fd10-4a48-a34a-7f1f75a383e2";
-
 type OidcClientLike = {
   authorizationUrl(args: any): string;
   callbackParams(req: any): any;
@@ -313,8 +311,8 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       // Also get users from DB to return enriched data
       let dbUsers: any[] = [];
       try {
-        dbUsers = await db.getUsersByClient(defaultClientId);
-        log.info(`Fetched ${dbUsers.length} users from database for client ${defaultClientId}`);
+        dbUsers = await db.getAllUsers();
+        log.info(`Fetched ${dbUsers.length} users from database`, { users: dbUsers });
       } catch (dbErr) {
         log.error('Failed to fetch users from database', { error: dbErr });
       }
@@ -622,14 +620,15 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         .filter(([, value]: [string, any]) => value!.os?.hostname)
         .map(([id, value]: [string, any]) => ({
           id,
-          clientId: defaultClientId,
+          clientId: value?.clientId,
           hostName: value.os.hostname,
           robotName: value.os.hostname,
         }));
 
       console.log('Syncing robots from portal', robots);
 
-      await db.syncRobotsSnapshot(defaultClientId, robots);
+      // Preserve existing client assignment in DB; do not force a default client.
+      await db.syncRobotsSnapshot(null, robots);
 
       return res.json({
         ok: true,

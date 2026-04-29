@@ -95,7 +95,7 @@ export type Db = {
   updateRobotClient(robotId: string, clientId: string | null): Promise<void>;
   updateRobotName(id: string, name: string): Promise<void>;
   deleteRobot(id: string): Promise<void>;
-  syncRobotsSnapshot(clientId: string, robots: RobotInfo[]): Promise<void>;
+  syncRobotsSnapshot(clientId: string | null, robots: RobotInfo[]): Promise<void>;
   
   // User-Robot relationships
   addUserToRobot(userId: string, robotId: string): Promise<void>;
@@ -465,7 +465,7 @@ export function createDb(databaseUrl: string): Db {
       );
     },
 
-    async syncRobotsSnapshot(clientId: string, robots: RobotInfo[]) {
+    async syncRobotsSnapshot(clientId: string | null, robots: RobotInfo[]) {
       const client = await pool.connect();
 
       try {
@@ -477,11 +477,16 @@ export function createDb(databaseUrl: string): Db {
              VALUES ($1, $2, $3, $4)
              ON CONFLICT (host_name)
              DO UPDATE SET robot_name = EXCLUDED.robot_name`,
-            [robot.id, clientId, robot.hostName, robot.robotName]
+            [robot.id, robot.clientId ?? clientId, robot.hostName, robot.robotName]
           );
         }
 
         const hostNames = robots.map(r => r.hostName);
+        
+        if (!clientId) {
+          await client.query('COMMIT');
+          return;
+        }
 
         if (hostNames.length === 0) {
           await client.query(`DELETE FROM robot WHERE client_id = $1`, [clientId]);
