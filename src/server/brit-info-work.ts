@@ -122,6 +122,31 @@ function resetWorkTracking(cache: BritInfoWorkCacheEntry, workKey: string) {
   cache.persistedWarningCount = 0;
 }
 
+async function restorePersistedWork(deviceId: string, cache: BritInfoWorkCacheEntry) {
+  const workKey = getWorkKey(cache);
+  const existingWorks = await db.getWorksForRobot(deviceId);
+
+  for (let index = existingWorks.length - 1; index >= 0; index -= 1) {
+    const work = existingWorks[index];
+    const existingKey = [
+      work.startTime,
+      work.filePath,
+      work.endTime,
+      work.totalTime,
+    ].map((value) => value ?? '').join('|');
+
+    if (existingKey === workKey) {
+      cache.persistedKey = workKey;
+      cache.workId = work.id;
+      cache.persistedInterruptionCount = cache.interruptions_detail?.length ?? 0;
+      cache.persistedWarningCount = cache.warnings_detail?.length ?? 0;
+      return work.id;
+    }
+  }
+
+  return null;
+}
+
 async function persistWorkDetails(deviceId: string, cache: BritInfoWorkCacheEntry) {
   if (!cache.workId) {
     return false;
@@ -192,6 +217,14 @@ async function persistCompletedWork(deviceId: string, cache: BritInfoWorkCacheEn
 
   if (cache.persistedKey !== workKey) {
     resetWorkTracking(cache, workKey);
+  }
+
+  if (!cache.workId) {
+    const restoredWorkId = await restorePersistedWork(deviceId, cache);
+    if (restoredWorkId) {
+      await persistWorkDetails(deviceId, cache);
+      return restoredWorkId;
+    }
   }
 
   cache.creatingWorkPromise = (async () => {

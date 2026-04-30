@@ -665,19 +665,56 @@ export function createDb(databaseUrl: string): Db {
 
     // Work operations
     async createWork(robotId: string, data: Partial<WorkInfo>) {
+      const startTime = data.startTime ?? null;
+      const endTime = data.endTime ?? null;
+      const estimatedTime = data.estimatedTime ?? null;
+      const totalTime = data.totalTime ?? null;
+      const interruptions = data.interruptions ?? 0;
+      const alarms = data.alarms ?? 0;
+      const filePath = data.filePath ?? null;
+
+      const existing = await pool.query(
+        `SELECT id
+         FROM work
+         WHERE robot_id = $1
+           AND start_time IS NOT DISTINCT FROM $2
+           AND end_time IS NOT DISTINCT FROM $3
+           AND estimated_time IS NOT DISTINCT FROM $4
+           AND total_time IS NOT DISTINCT FROM $5
+           AND interruptions IS NOT DISTINCT FROM $6
+           AND alarms IS NOT DISTINCT FROM $7
+           AND file_path IS NOT DISTINCT FROM $8
+         ORDER BY created_at ASC
+         LIMIT 1`,
+        [
+          robotId,
+          startTime,
+          endTime,
+          estimatedTime,
+          totalTime,
+          interruptions,
+          alarms,
+          filePath,
+        ]
+      );
+
+      if (existing.rows[0]?.id) {
+        return existing.rows[0].id;
+      }
+
       const { rows } = await pool.query(
         `INSERT INTO work (robot_id, start_time, end_time, estimated_time, total_time, interruptions, alarms, file_path)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
         [
           robotId,
-          data.startTime || null,
-          data.endTime || null,
-          data.estimatedTime || null,
-          data.totalTime || null,
-          data.interruptions || 0,
-          data.alarms || 0,
-          data.filePath || null,
+          startTime,
+          endTime,
+          estimatedTime,
+          totalTime,
+          interruptions,
+          alarms,
+          filePath,
         ]
       );
       return rows[0].id;

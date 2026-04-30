@@ -470,7 +470,14 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       }
 
       const updatedUser = await cognitoAdmin.getUser(username);
-      return res.json(updatedUser);
+      const dbUser = await db.getUserById(username);
+      const client = dbUser?.clientId ? await db.getClient(dbUser.clientId) : null;
+
+      return res.json({
+        ...updatedUser,
+        clientId: dbUser?.clientId || null,
+        clientName: client?.name || null,
+      });
     } catch (err) {
       log.error('Set user groups failed', err);
       return res.status(502).json({ error: 'Set user groups failed' });
@@ -509,12 +516,13 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
 
   app.patch('/admin/users/:username/client', requireAdmin, async (req, res) => {
     const username = req.params.username;
-    const { clientName } = req.body || {};
+    const { clientId } = req.body || "VACIO";
 
-    log.info('Patch user client request', { username, clientName });
+    console.log('Patch user client request', { username, clientId });
+    log.info('Patch user client request', { username, clientId });
 
-    if (clientName !== null && clientName !== undefined && typeof clientName !== 'string') {
-      return res.status(400).json({ error: 'clientName must be a string or null' });
+    if (clientId !== null && clientId !== undefined && typeof clientId !== 'string') {
+      return res.status(400).json({ error: 'clientId must be a string or null' });
     }
 
     try {
@@ -524,27 +532,19 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         return res.status(404).json({ error: 'User not found in database' });
       }
 
-      // 🔹 Si viene clientName → buscar client
-      if (clientName) {
-        const client = await db.getClientByName(clientName);
-
-        if (!client) {
-          return res.status(404).json({ error: 'Client not found' });
-        }
-
-        await db.updateUserClient(user.id, client.id);
+      if (clientId) {
+        await db.updateUserClient(user.id, clientId);
 
         return res.json({
           ok: true,
           username,
           userId: user.id,
           email: user.email,
-          clientId: client.id,
-          clientName: client.name,
+          clientId,
+          clientName: null,
         });
       }
 
-      // 🔹 Si viene null → quitar cliente
       await db.updateUserClient(user.id, null as any);
 
       return res.json({
@@ -556,7 +556,7 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
         clientName: null,
       });
     } catch (err) {
-      log.error('Update user client failed', { username, clientName, error: err });
+      log.error('Update user client failed', { username, clientId, error: err });
       return res.status(500).json({ error: 'Update user client failed' });
     }
   });

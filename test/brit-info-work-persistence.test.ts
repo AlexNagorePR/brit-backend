@@ -4,6 +4,7 @@ const mockDb = vi.hoisted(() => ({
   createWork: vi.fn().mockResolvedValue('work-id-1'),
   createInterruption: vi.fn().mockResolvedValue('interruption-id-1'),
   createWarning: vi.fn().mockResolvedValue('warning-id-1'),
+  getWorksForRobot: vi.fn().mockResolvedValue([]),
 }));
 
 const onDataHandlers = vi.hoisted(() => [] as Array<() => void>);
@@ -144,5 +145,73 @@ describe('Brit Info Work persistence', () => {
     expect(mockDb.createWork).toHaveBeenCalledTimes(1);
     expect(mockDb.createInterruption).toHaveBeenCalledTimes(1);
     expect(mockDb.createWarning).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses an already persisted work on restart instead of inserting it again', async () => {
+    mockDb.getWorksForRobot.mockResolvedValueOnce([
+      {
+        id: 'work-id-1',
+        robotId: 'device-2',
+        startTime: '2026-04-22 12:00:00',
+        endTime: '2026-04-29 12:02:00',
+        estimatedTime: 300,
+        totalTime: 120.5,
+        interruptions: 1,
+        alarms: 1,
+        filePath: '/tmp/test.json',
+      },
+    ]);
+
+    const { subscribeWorkInfo } = await import('@/server/brit-info-work.js');
+
+    await subscribeWorkInfo({
+      jwtSecret: 'secret',
+      transitiveUser: 'user',
+      deviceId: 'device-2',
+    });
+
+    mockRosTool.deviceData = {
+      ros: {
+        2: {
+          messages: {
+            brit_info_work: {
+              start_time: '2026-04-22 12:00:00',
+              json_file_path: '/tmp/test.json',
+              estimated_time: 300,
+              interruptions_count: 1,
+              interruptions_detail: [
+                {
+                  type: 'state_change',
+                  new_state: 3,
+                  time_from_start: 10.5,
+                  timestamp: '2026-04-22 12:00:10',
+                },
+              ],
+              warnings_count: 1,
+              warnings_detail: [
+                {
+                  type: 'warning',
+                  time_from_start: 20,
+                  timestamp: '2026-04-22 12:00:20',
+                  name: 'motor_warning',
+                  message: 'overcurrent',
+                  level: 1,
+                },
+              ],
+              total_time: 120.5,
+              end_time: '2026-04-29 12:02:00',
+            },
+          },
+        },
+      },
+    };
+
+    onDataHandlers[0]();
+    await flush();
+
+    expect(mockDb.getWorksForRobot).toHaveBeenCalledWith('device-2');
+    expect(mockDb.createWork).not.toHaveBeenCalled();
+    expect(mockDb.createInterruption).not.toHaveBeenCalled();
+    expect(mockDb.createWarning).not.toHaveBeenCalled();
   });
 });
