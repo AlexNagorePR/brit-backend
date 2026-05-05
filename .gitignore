@@ -149,4 +149,6 @@ dist-ssr
 
 var
 
+*.pem
+
 repomix*
