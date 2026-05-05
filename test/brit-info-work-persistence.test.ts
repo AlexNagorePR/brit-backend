@@ -7,12 +7,12 @@ const mockDb = vi.hoisted(() => ({
   getWorksForRobot: vi.fn().mockResolvedValue([]),
 }));
 
-const onDataHandlers = vi.hoisted(() => [] as Array<() => void>);
+const onDataHandlers = vi.hoisted(() => [] as Array<(arg?: any) => void>);
 
 const mockRosTool = vi.hoisted(() => ({
   deviceData: null as any,
   subscribe: vi.fn(),
-  onData: vi.fn((handler: () => void) => {
+  onData: vi.fn((handler: (arg?: any) => void) => {
     onDataHandlers.push(handler);
   }),
 }));
@@ -50,9 +50,12 @@ describe('Brit Info Work persistence', () => {
     vi.clearAllMocks();
     onDataHandlers.length = 0;
     mockRosTool.deviceData = null;
+    mockDb.getWorksForRobot.mockResolvedValue([]);
   });
 
   it('stores interruptions and warnings once the work snapshot is complete', async () => {
+    mockDb.getWorksForRobot.mockResolvedValue([]);
+
     const { subscribeWorkInfo } = await import('@/server/brit-info-work.js');
 
     await subscribeWorkInfo({
@@ -64,6 +67,7 @@ describe('Brit Info Work persistence', () => {
     expect(mockRosTool.subscribe).toHaveBeenCalledWith(2, '/brit_info_work');
     expect(onDataHandlers).toHaveLength(1);
 
+    // Work is incomplete, should not create anything
     mockRosTool.deviceData = {
       ros: {
         2: {
@@ -85,6 +89,7 @@ describe('Brit Info Work persistence', () => {
     expect(mockDb.createInterruption).not.toHaveBeenCalled();
     expect(mockDb.createWarning).not.toHaveBeenCalled();
 
+    // Work is now complete, should create work and related records
     mockRosTool.deviceData = {
       ros: {
         2: {
@@ -126,8 +131,8 @@ describe('Brit Info Work persistence', () => {
 
     expect(mockDb.createWork).toHaveBeenCalledTimes(1);
     expect(mockDb.createWork).toHaveBeenCalledWith('device-1', {
-      startTime: '2026-04-22 12:00:00',
-      endTime: '2026-04-29 12:02:00',
+      startTime: '2026-04-22T12:00:00.000Z',
+      endTime: '2026-04-29T12:02:00.000Z',
       estimatedTime: 300,
       totalTime: 120.5,
       interruptions: 1,
@@ -139,6 +144,21 @@ describe('Brit Info Work persistence', () => {
     expect(mockDb.createWarning).toHaveBeenCalledTimes(1);
     expect(mockDb.createWarning).toHaveBeenCalledWith('work-id-1', 1, 20);
 
+    // Sending same data again should not create interruptions/warnings (work already exists)
+    mockDb.getWorksForRobot.mockResolvedValue([
+      {
+        id: 'work-id-1',
+        robotId: 'device-1',
+        startTime: '2026-04-22 12:00:00',
+        endTime: '2026-04-29 12:02:00',
+        estimatedTime: 300,
+        totalTime: 120.5,
+        interruptions: 1,
+        alarms: 1,
+        filePath: '/tmp/test.json',
+      },
+    ]);
+
     onDataHandlers[0]();
     await flush();
 
@@ -147,13 +167,13 @@ describe('Brit Info Work persistence', () => {
     expect(mockDb.createWarning).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses an already persisted work on restart instead of inserting it again', async () => {
-    mockDb.getWorksForRobot.mockResolvedValueOnce([
+  it('does not create work if it already exists in database with same identifying fields', async () => {
+    mockDb.getWorksForRobot.mockResolvedValue([
       {
         id: 'work-id-1',
         robotId: 'device-2',
-        startTime: '2026-04-22 12:00:00',
-        endTime: '2026-04-29 12:02:00',
+        startTime: new Date('2026-04-22T12:00:00.000Z'),
+        endTime: new Date('2026-04-29T12:02:00.000Z'),
         estimatedTime: 300,
         totalTime: 120.5,
         interruptions: 1,
@@ -209,9 +229,88 @@ describe('Brit Info Work persistence', () => {
     onDataHandlers[0]();
     await flush();
 
-    expect(mockDb.getWorksForRobot).toHaveBeenCalledWith('device-2');
+    // Should not create anything since work already exists
     expect(mockDb.createWork).not.toHaveBeenCalled();
     expect(mockDb.createInterruption).not.toHaveBeenCalled();
     expect(mockDb.createWarning).not.toHaveBeenCalled();
+  });
+
+  it('creates work if it exists in database but with different file_path', async () => {
+    mockDb.getWorksForRobot.mockResolvedValue([
+      {
+        id: 'work-id-1',
+        robotId: 'device-3',
+        startTime: '2026-04-22 12:00:00',
+        endTime: '2026-04-29 12:02:00',
+        estimatedTime: 300,
+        totalTime: 120.5,
+        interruptions: 1,
+        alarms: 1,
+        filePath: '/tmp/old.json',
+      },
+    ]);
+
+    const { subscribeWorkInfo } = await import('@/server/brit-info-work.js');
+
+    await subscribeWorkInfo({
+      jwtSecret: 'secret',
+      transitiveUser: 'user',
+      deviceId: 'device-3',
+    });
+
+    mockRosTool.deviceData = {
+      ros: {
+        2: {
+          messages: {
+            brit_info_work: {
+              start_time: '2026-04-22 12:00:00',
+              json_file_path: '/tmp/new.json',
+              estimated_time: 300,
+              interruptions_count: 1,
+              interruptions_detail: [
+                {
+                  type: 'state_change',
+                  new_state: 3,
+                  time_from_start: 10.5,
+                  timestamp: '2026-04-22 12:00:10',
+                },
+              ],
+              warnings_count: 1,
+              warnings_detail: [
+                {
+                  type: 'warning',
+                  time_from_start: 20,
+                  timestamp: '2026-04-22 12:00:20',
+                  name: 'motor_warning',
+                  message: 'overcurrent',
+                  level: 1,
+                },
+              ],
+              total_time: 120.5,
+              end_time: '2026-04-29 12:02:00',
+            },
+          },
+        },
+      },
+    };
+
+    onDataHandlers[0]();
+    await flush();
+
+    // Different file_path means it's a different work, should create new one
+    expect(mockDb.createWork).toHaveBeenCalledTimes(1);
+    expect(mockDb.createWork).toHaveBeenCalledWith('device-3', {
+      startTime: '2026-04-22T12:00:00.000Z',
+      endTime: '2026-04-29T12:02:00.000Z',
+      estimatedTime: 300,
+      totalTime: 120.5,
+      interruptions: 1,
+      alarms: 1,
+      filePath: '/tmp/new.json',
+    });
+    expect(mockDb.createInterruption).toHaveBeenCalledTimes(1);
+    expect(mockDb.createWarning).toHaveBeenCalledTimes(1);
+    expect(mockDb.createInterruption).toHaveBeenCalledTimes(1);
+    expect(mockDb.createWarning).toHaveBeenCalledTimes(1);
   });
 });

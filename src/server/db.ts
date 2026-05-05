@@ -1,5 +1,7 @@
 // src/server/db.ts
 import { Pool } from 'pg';
+import fs from 'fs';
+import path from 'path';
 
 export type ClientInfo = {
   id: string;
@@ -94,6 +96,7 @@ export type Db = {
   upsertRobot(clientId: string, hostName: string, robotName: string): Promise<void>;
   updateRobotClient(robotId: string, clientId: string | null): Promise<void>;
   updateRobotName(id: string, name: string): Promise<void>;
+  updateRobotInfo(id: string, updates: Pick<Partial<RobotInfo>, 'lastClean' | 'lastWork' | 'works' | 'timeOn' | 'timeWork'>): Promise<void>;
   deleteRobot(id: string): Promise<void>;
   syncRobotsSnapshot(clientId: string | null, robots: RobotInfo[]): Promise<void>;
   
@@ -102,6 +105,7 @@ export type Db = {
   removeUserFromRobot(userId: string, robotId: string): Promise<void>;
   setUsersForRobot(robotId: string, userIds: string[]): Promise<void>;
   getUsersForRobot(robotId: string): Promise<string[]>;
+  getRobotById(robotId: string): Promise<(Omit<RobotInfo, 'works'> & { clientName?: string; userEmails: string[]; works: (Omit<WorkInfo, 'interruptions'> & { interruptions?: InterruptionInfo[]; warnings?: WarningInfo[] })[]; cleans: CleanInfo[] }) | null>;
 
   // Battery operations
   createBattery(clientId: string, serialNumber?: string, stateOfHealth?: number): Promise<string>;
@@ -135,7 +139,19 @@ export type Db = {
 };
 
 export function createDb(databaseUrl: string): Db {
-  const pool = new Pool({ connectionString: databaseUrl });
+  const isLocalDB =
+    databaseUrl.includes('localhost') || databaseUrl.includes('127.0.0.1');
+
+  const sslConfig = isLocalDB
+    ? false
+    : {
+        rejectUnauthorized: true,
+        ca: fs.readFileSync(
+          process.env.RDS_CA_PATH || path.join(process.cwd(), 'global-bundle.pem')
+        ),
+      };
+
+  const pool = new Pool({ connectionString: databaseUrl, ssl: sslConfig });
 
   return {
     // Client operations
@@ -429,6 +445,124 @@ export function createDb(databaseUrl: string): Db {
       }));
     },
 
+    async getRobotById(robotId: string) {
+      const { rows } = await pool.query(
+        `SELECT r.id, r.client_id, r.host_name, r.robot_name, c.name as client_name,
+                COALESCE(array_agg(DISTINCT u.email ORDER BY u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) as user_emails
+         FROM robot r
+         LEFT JOIN user_robot ur ON r.id = ur.robot_id
+         LEFT JOIN "user" u ON ur.user_id = u.id
+         LEFT JOIN client c ON r.client_id = c.id
+         WHERE r.id = $1
+         GROUP BY r.id, r.client_id, r.host_name, r.robot_name, c.name`,
+        [robotId]
+      );
+
+      if (!rows[0]) return null;
+
+      const r = rows[0];
+
+      const worksRes = await pool.query(
+        `SELECT id, robot_id, start_time, end_time, estimated_time, total_time, interruptions, alarms, file_path
+         FROM work
+         WHERE robot_id = $1
+         ORDER BY created_at ASC`,
+        [robotId]
+      );
+
+      const cleansRes = await pool.query(
+        `SELECT id, robot_id, date, event
+         FROM clean
+         WHERE robot_id = $1
+         ORDER BY date ASC`,
+        [robotId]
+      );
+
+      const works = worksRes.rows.map((w: any) => ({
+        id: w.id,
+        robotId: w.robot_id,
+        startTime: w.start_time,
+        endTime: w.end_time,
+        estimatedTime: w.estimated_time,
+        totalTime: w.total_time,
+        interruptions: w.interruptions,
+        alarms: w.alarms,
+        filePath: w.file_path,
+      }));
+
+      // Fetch interruptions and warnings for all works in a single query
+      const workIds = worksRes.rows.map((w: any) => w.id);
+
+      let interruptionsByWork: Record<string, InterruptionInfo[]> = {};
+      let warningsByWork: Record<string, WarningInfo[]> = {};
+
+      if (workIds.length > 0) {
+        const interruptionsRes = await pool.query(
+          `SELECT id, work_id, state_code, event_time, return_to_auto
+           FROM interruption
+           WHERE work_id = ANY($1)
+           ORDER BY created_at ASC`,
+          [workIds]
+        );
+
+        for (const row of interruptionsRes.rows) {
+          const item: InterruptionInfo = {
+            id: row.id,
+            workId: row.work_id,
+            stateCode: row.state_code,
+            eventTime: row.event_time,
+            returnToAuto: row.return_to_auto,
+          };
+          interruptionsByWork[row.work_id] ||= [];
+          interruptionsByWork[row.work_id].push(item);
+        }
+
+        const warningsRes = await pool.query(
+          `SELECT id, work_id, alarm_code, event_time
+           FROM warning
+           WHERE work_id = ANY($1)
+           ORDER BY created_at ASC`,
+          [workIds]
+        );
+
+        for (const row of warningsRes.rows) {
+          const item: WarningInfo = {
+            id: row.id,
+            workId: row.work_id,
+            alarmCode: row.alarm_code,
+            eventTime: row.event_time,
+          };
+          warningsByWork[row.work_id] ||= [];
+          warningsByWork[row.work_id].push(item);
+        }
+      }
+
+      // Attach interruptions and warnings to works
+      const worksWithDetails = works.map(w => ({
+        ...w,
+        interruptions: interruptionsByWork[w.id] || [],
+        warnings: warningsByWork[w.id] || [],
+      }));
+
+      const cleans = cleansRes.rows.map((c: any) => ({
+        id: c.id,
+        robotId: c.robot_id,
+        date: c.date,
+        event: c.event,
+      }));
+
+      return {
+        id: r.id,
+        clientId: r.client_id,
+        clientName: r.client_name,
+        hostName: r.host_name,
+        robotName: r.robot_name,
+        userEmails: r.user_emails,
+        works: worksWithDetails,
+        cleans,
+      };
+    },
+
     async upsertRobot(clientId: string, hostName: string, robotName: string) {
       await pool.query(
         `INSERT INTO robot (client_id, host_name, robot_name)
@@ -454,6 +588,41 @@ export function createDb(databaseUrl: string): Db {
          SET robot_name = $2
          WHERE id = $1`,
         [id, name]
+      );
+    },
+
+    async updateRobotInfo(id: string, updates: Pick<Partial<RobotInfo>, 'lastClean' | 'lastWork' | 'works' | 'timeOn' | 'timeWork'>) {
+      const fields: string[] = [];
+      const values: any[] = [];
+      let paramCount = 1;
+
+      if (updates.lastClean !== undefined) {
+        fields.push(`last_clean = $${paramCount++}`);
+        values.push(updates.lastClean);
+      }
+      if (updates.lastWork !== undefined) {
+        fields.push(`last_work = $${paramCount++}`);
+        values.push(updates.lastWork);
+      }
+      if (updates.works !== undefined) {
+        fields.push(`works = $${paramCount++}`);
+        values.push(updates.works);
+      }
+      if (updates.timeOn !== undefined) {
+        fields.push(`time_on = $${paramCount++}`);
+        values.push(updates.timeOn);
+      }
+      if (updates.timeWork !== undefined) {
+        fields.push(`time_work = $${paramCount++}`);
+        values.push(updates.timeWork);
+      }
+
+      if (fields.length === 0) return;
+
+      values.push(id);
+      await pool.query(
+        `UPDATE robot SET ${fields.join(', ')} WHERE id = $${paramCount}`,
+        values
       );
     },
 
@@ -673,27 +842,20 @@ export function createDb(databaseUrl: string): Db {
       const alarms = data.alarms ?? 0;
       const filePath = data.filePath ?? null;
 
+      // Search only by fields that uniquely identify the work and don't change
       const existing = await pool.query(
         `SELECT id
          FROM work
          WHERE robot_id = $1
            AND start_time IS NOT DISTINCT FROM $2
            AND end_time IS NOT DISTINCT FROM $3
-           AND estimated_time IS NOT DISTINCT FROM $4
-           AND total_time IS NOT DISTINCT FROM $5
-           AND interruptions IS NOT DISTINCT FROM $6
-           AND alarms IS NOT DISTINCT FROM $7
-           AND file_path IS NOT DISTINCT FROM $8
+           AND file_path IS NOT DISTINCT FROM $4
          ORDER BY created_at ASC
          LIMIT 1`,
         [
           robotId,
           startTime,
           endTime,
-          estimatedTime,
-          totalTime,
-          interruptions,
-          alarms,
           filePath,
         ]
       );

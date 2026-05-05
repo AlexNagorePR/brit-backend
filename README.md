@@ -146,7 +146,7 @@ Obtiene un token JWT para acceder a capacidades de Transitive.
 - **Cuerpo de solicitud**:
 ```json
 {
-  "capability": "string"  // Ej: "ros-tool", "health-monitoring"
+  "capability": "string"  // Ej: "ros-tool"
 }
 ```
 - **Respuesta**:
@@ -170,31 +170,6 @@ Health check del servicio.
 }
 ```
 - **Códigos de estado**: 200 (OK)
-
-#### `GET /api/health-monitoring/:deviceId`
-Obtiene diagnósticos de salud de un dispositivo.
-- **Autenticación**: Requerida (login)
-- **Parámetros de ruta**: `deviceId` (string)
-- **Respuesta**:
-```json
-{
-  "ok": true,
-  "data": {
-    "deviceId": "string",
-    "version": "string",
-    "lastUpdateAt": "ISO8601",
-    "diagnostics": {
-      "diagnostic_name": {
-        "level": number,
-        "message": "string",
-        "hardwareId": "string",
-        "values": {}
-      }
-    }
-  }
-}
-```
-- **Códigos de estado**: 200 (OK), 500 (Error interno)
 
 ### 🤖 Dispositivos y Robots
 
@@ -466,6 +441,41 @@ Lista todos los robots en la BD.
 - **Respuesta**: Array de robots
 - **Códigos de estado**: 200 (OK), 500 (Error)
 
+#### `GET /admin/robots/:robotId`
+Obtiene información detallada de un robot específico (incluye trabajos, limpiezas, interrupciones y advertencias).
+- **Autenticación**: Requerida (admin)
+- **Parámetros de ruta**: `robotId` (string)
+- **Respuesta**:
+```json
+{
+  "id": "string",
+  "clientId": "string",
+  "clientName": "string",
+  "hostName": "string",
+  "robotName": "string",
+  "userEmails": ["string"],
+  "works": [
+    {
+      "id": "string",
+      "robotId": "string",
+      "startTime": "ISO8601",
+      "endTime": "ISO8601",
+      "estimatedTime": number,
+      "totalTime": number,
+      "filePath": "string",
+      "interruptions": [
+        { "id": "string", "workId": "string", "stateCode": number, "eventTime": number, "returnToAuto": number }
+      ],
+      "warnings": [
+        { "id": "string", "workId": "string", "alarmCode": number, "eventTime": number }
+      ]
+    }
+  ],
+  "cleans": [ { "id": "string", "robotId": "string", "date": "ISO8601", "event": "Start|End" } ]
+}
+```
+- **Códigos de estado**: 200 (OK), 404 (No encontrado), 500 (Error)
+
 #### `GET /admin/robots/:robotId/users`
 Obtiene usuarios asignados a un robot.
 - **Autenticación**: Requerida (admin)
@@ -618,7 +628,6 @@ src/
 │   ├── db.ts                  # Cliente de base de datos y consultas
 │   ├── brit-info-work.ts      # Controlador de suscripción de info de trabajo
 │   ├── telemetry.ts           # Recopilación de telemetría
-│   ├── health-monitoring.ts   # Monitoreo de salud
 │   ├── collector.ts           # Servicio principal recolector
 │   ├── portal.ts              # API de Transitive Portal
 │   └── cognito-admin.ts       # Operaciones admin de Cognito

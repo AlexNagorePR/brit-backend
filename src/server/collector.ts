@@ -1,9 +1,9 @@
 import utils from '@transitive-sdk/utils';
 
 import type { Db, RobotInfo } from '@/server/db.js';
-import { subscribeHealthMonitoringCloud } from '@/server/health-monitoring.js';
 import { subscribeTelemetry } from '@/server/telemetry.js';
 import { subscribeWorkInfo } from '@/server/brit-info-work.js';
+import { subscribeRobotInfo } from '@/server/brit-info-robot.js';
 import { fetchPortalApi, signPortalApiJWT } from '@/server/portal.js';
 
 const log = utils.getLogger('collector');
@@ -21,9 +21,9 @@ class CollectorService {
   private transitiveUser: string;
 
   private started = false;
-  private healthSubscribedDevices = new Set<string>();
   private telemetrySubscribedDevices = new Set<string>();
   private britInfoWorkSubscribedDevices = new Set<string>();
+  private britInfoRobotSubscribedDevices = new Set<string>();
   private refreshTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: CollectorDeps) {
@@ -72,19 +72,18 @@ class CollectorService {
 
     const runningMap = await this.loadRunningRobots();
 
-    // robots = [{
-    //   id: 'd_britsimulator01',
-    //   clientId: '00544dc1-fd10-4a48-a34a-7f1f75a383e2',
-    //   hostName: 'brit-simulator-01',
-    //   robotName: 'brit-simulator-01',
-    //   userEmails: [ 'alex.nagore@phenomenonrobotics.com' ]
-    // }];
+    robots = [{
+      id: 'd_b440cd1',
+      clientId: '35f22242-715b-448c-9c1e-c0d378f27d6f',
+      hostName: 'b440cd1',
+      robotName: 'b440cd1',
+      userEmails: [ 'alex.nagore@phenomenonrobotics.com' ]
+    }];
 
     for (const robot of robots) {
       // Subscribe to brit-info-work for all robots
       await this.ensureBritInfoWorkSubscribed(robot.id);
-
-      // await this.ensureHealthMonitoringSubscribed(robot.id);
+      await this.ensureBritInfoRobotSubscribed(robot.id);
 
       const runningInfo = runningMap[robot.id];
       const hasRosTool = Boolean(
@@ -94,28 +93,6 @@ class CollectorService {
       if (hasRosTool) {
         await this.ensureTelemetrySubscribed(robot.id);
       }
-    }
-  }
-
-  async ensureHealthMonitoringSubscribed(deviceId: string) {
-    if (this.healthSubscribedDevices.has(deviceId)) {
-      return;
-    }
-
-    try {
-      log.info('Collector subscribing health-monitoring', { deviceId });
-
-      await subscribeHealthMonitoringCloud({
-        jwtSecret: this.jwtSecret,
-        transitiveUser: this.transitiveUser,
-        deviceId,
-      });
-
-      this.healthSubscribedDevices.add(deviceId);
-
-      log.info('Collector subscribed health-monitoring successfully', { deviceId });
-    } catch (err) {
-      log.error('Collector failed subscribing health-monitoring', { deviceId, err });
     }
   }
 
@@ -163,6 +140,28 @@ class CollectorService {
     }
   }
 
+  async ensureBritInfoRobotSubscribed(deviceId: string) {
+    if (this.britInfoRobotSubscribedDevices.has(deviceId)) {
+      return;
+    }
+
+    try {
+      log.info('Collector subscribing brit-info-robot', { deviceId });
+
+      await subscribeRobotInfo({
+        jwtSecret: this.jwtSecret,
+        transitiveUser: this.transitiveUser,
+        deviceId,
+      });
+
+      this.britInfoRobotSubscribedDevices.add(deviceId);
+
+      log.info('Collector subscribed brit-info-robot successfully', { deviceId });
+    } catch (err) {
+      log.error('Collector failed subscribing brit-info-robot', { deviceId, err });
+    }
+  }
+
   async loadRunningRobots(): Promise<Record<string, any>> {
     try {
       const token = signPortalApiJWT({
@@ -187,9 +186,9 @@ class CollectorService {
   getStatus() {
     return {
       started: this.started,
-      healthSubscribedDevices: [...this.healthSubscribedDevices],
       telemetrySubscribedDevices: [...this.telemetrySubscribedDevices],
       britInfoWorkSubscribedDevices: [...this.britInfoWorkSubscribedDevices],
+      britInfoRobotSubscribedDevices: [...this.britInfoRobotSubscribedDevices],
     };
   }
 }

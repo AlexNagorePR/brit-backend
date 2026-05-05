@@ -14,9 +14,6 @@ import { createDb, RobotInfo } from '@/server/db.js';
 import { generators } from 'openid-client';
 import { getTelemetryData, subscribeTelemetry } from '@/server/telemetry.js';
 import { createCognitoAdminService } from './cognito-admin.js';
-import {
-  getHealthMonitoringSnapshot
-} from '@/server/health-monitoring.js';
 import { createCollector, getCollector } from '@/server/collector.js';
 
 const log = utils.getLogger('app');
@@ -208,17 +205,6 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
 
   app.get('/api/health', (_req, res) => {
     return res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
-
-  app.get('/api/health-monitoring/:deviceId', requireLogin, async (req, res) => {
-    const deviceId = req.params.deviceId;
-
-    const data = getHealthMonitoringSnapshot(deviceId);
-
-    return res.json({
-      ok: true,
-      data,
-    });
   });
 
   app.get('/api/devices', requireLogin, async (req, res) => {
@@ -649,6 +635,23 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
     } catch (err) {
       log.error('List robots failed', err);
       return res.status(500).json({ error: 'List robots failed' });
+    }
+  });
+
+  app.get('/admin/robots/:robotId', requireAdmin, async (req, res) => {
+    const robotId = req.params.robotId;
+
+    try {
+      const robot = await db.getRobotById(robotId);
+
+      if (!robot) {
+        return res.status(404).json({ error: 'Robot not found' });
+      }
+
+      return res.json(robot);
+    } catch (err) {
+      log.error('Get robot failed', { robotId, error: err });
+      return res.status(500).json({ error: 'Get robot failed' });
     }
   });
 

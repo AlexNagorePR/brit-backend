@@ -30,13 +30,8 @@ type BritInfoWorkMessage = {
   end_time?: string | null;
 };
 
-type BritInfoWorkCacheEntry = BritInfoWorkMessage & {
-  persistedKey: string | null;
-  workId: string | null;
-  creatingWorkPromise: Promise<string> | null;
-  persistedInterruptionCount: number;
-  persistedWarningCount: number;
-};
+type BritInfoWorkCacheEntry = BritInfoWorkMessage;
+type WorkTimestamp = string | Date | null | undefined;
 
 const workInfoCache: Record<string, BritInfoWorkCacheEntry> = {};
 const subscribedDevices = new Set<string>();
@@ -58,11 +53,6 @@ function ensureDeviceCache(deviceId: string) {
       warnings_detail: null,
       total_time: null,
       end_time: null,
-      persistedKey: null,
-      workId: null,
-      creatingWorkPromise: null,
-      persistedInterruptionCount: 0,
-      persistedWarningCount: 0,
     };
   }
 
@@ -105,149 +95,107 @@ function isCompleteWorkMessage(cache: BritInfoWorkCacheEntry) {
   );
 }
 
-function getWorkKey(cache: BritInfoWorkCacheEntry) {
-  return [
-    cache.start_time,
-    cache.json_file_path,
-    cache.end_time,
-    cache.total_time,
-  ].map((value) => value ?? '').join('|');
-}
-
-function resetWorkTracking(cache: BritInfoWorkCacheEntry, workKey: string) {
-  cache.persistedKey = workKey;
-  cache.workId = null;
-  cache.creatingWorkPromise = null;
-  cache.persistedInterruptionCount = 0;
-  cache.persistedWarningCount = 0;
-}
-
-async function restorePersistedWork(deviceId: string, cache: BritInfoWorkCacheEntry) {
-  const workKey = getWorkKey(cache);
-  const existingWorks = await db.getWorksForRobot(deviceId);
-
-  for (let index = existingWorks.length - 1; index >= 0; index -= 1) {
-    const work = existingWorks[index];
-    const existingKey = [
-      work.startTime,
-      work.filePath,
-      work.endTime,
-      work.totalTime,
-    ].map((value) => value ?? '').join('|');
-
-    if (existingKey === workKey) {
-      cache.persistedKey = workKey;
-      cache.workId = work.id;
-      cache.persistedInterruptionCount = cache.interruptions_detail?.length ?? 0;
-      cache.persistedWarningCount = cache.warnings_detail?.length ?? 0;
-      return work.id;
-    }
+function normalizeWorkTimestamp(value: WorkTimestamp) {
+  if (!value) {
+    return null;
   }
 
-  return null;
-}
-
-async function persistWorkDetails(deviceId: string, cache: BritInfoWorkCacheEntry) {
-  if (!cache.workId) {
-    return false;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
   }
 
-  let insertedAny = false;
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
 
-  const interruptions = cache.interruptions_detail ?? [];
-  for (let index = cache.persistedInterruptionCount; index < interruptions.length; index += 1) {
-    const item = interruptions[index];
+  const hasTimeZone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(trimmed);
+  const isoLike = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+  const date = new Date(hasTimeZone ? isoLike : `${isoLike}Z`);
+
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+async function saveInterruptions(workId: string, interruptions: BritInfoWorkMessage['interruptions_detail']) {
+  const details = interruptions ?? [];
+  
+  for (let index = 0; index < details.length; index += 1) {
+    const item = details[index];
     if (!item || item.type !== 'state_change') {
-      cache.persistedInterruptionCount = index + 1;
       continue;
     }
 
     await db.createInterruption(
-      cache.workId,
+      workId,
       item.new_state ?? 0,
       item.time_from_start,
       item.return_to_auto
     );
-    cache.persistedInterruptionCount = index + 1;
-    insertedAny = true;
   }
+}
 
-  const warnings = cache.warnings_detail ?? [];
-  for (let index = cache.persistedWarningCount; index < warnings.length; index += 1) {
-    const item = warnings[index];
+async function saveWarnings(workId: string, warnings: BritInfoWorkMessage['warnings_detail']) {
+  const details = warnings ?? [];
+  
+  for (let index = 0; index < details.length; index += 1) {
+    const item = details[index];
     if (!item || item.type !== 'warning') {
-      cache.persistedWarningCount = index + 1;
       continue;
     }
 
     await db.createWarning(
-      cache.workId,
+      workId,
       item.level ?? 0,
       item.time_from_start
     );
-    cache.persistedWarningCount = index + 1;
-    insertedAny = true;
   }
-
-  if (insertedAny) {
-    console.log('Persisted brit_info_work details for device', deviceId, {
-      workId: cache.workId,
-      interruptions: cache.persistedInterruptionCount,
-      warnings: cache.persistedWarningCount,
-    });
-  }
-
-  return insertedAny;
 }
 
-async function persistCompletedWork(deviceId: string, cache: BritInfoWorkCacheEntry) {
-  if (cache.creatingWorkPromise) {
-    return cache.creatingWorkPromise;
-  }
-
+async function saveWork(deviceId: string, cache: BritInfoWorkCacheEntry) {
   if (!isCompleteWorkMessage(cache)) {
     return null;
   }
 
-  const workKey = getWorkKey(cache);
-  if (cache.workId && cache.persistedKey === workKey) {
-    await persistWorkDetails(deviceId, cache);
-    return cache.workId;
+  const startTime = normalizeWorkTimestamp(cache.start_time) ?? undefined;
+  const endTime = normalizeWorkTimestamp(cache.end_time) ?? undefined;
+
+  // Check if work already exists before creating
+  const existingWorks = await db.getWorksForRobot(deviceId);
+
+  const existingWork = existingWorks.find(w => {
+    const startTimeMatch = normalizeWorkTimestamp(w.startTime) === startTime;
+    const endTimeMatch = normalizeWorkTimestamp(w.endTime) === endTime;
+    const filePathMatch = w.filePath === cache.json_file_path;
+
+    return startTimeMatch && endTimeMatch && filePathMatch;
+  });
+
+  if (existingWork) {
+    return existingWork.id;
   }
 
-  if (cache.persistedKey !== workKey) {
-    resetWorkTracking(cache, workKey);
-  }
+  // Work is new, create it and save related records
+  const workId = await db.createWork(deviceId, {
+    startTime,
+    endTime,
+    estimatedTime: cache.estimated_time ?? undefined,
+    totalTime: cache.total_time ?? undefined,
+    interruptions: cache.interruption_count ?? cache.interruptions_count ?? 0,
+    alarms: cache.warning_count ?? cache.warnings_count ?? 0,
+    filePath: cache.json_file_path ?? undefined,
+  });
 
-  if (!cache.workId) {
-    const restoredWorkId = await restorePersistedWork(deviceId, cache);
-    if (restoredWorkId) {
-      await persistWorkDetails(deviceId, cache);
-      return restoredWorkId;
-    }
-  }
+  // Save interruptions and warnings only for newly created work
+  await saveInterruptions(workId, cache.interruptions_detail);
+  await saveWarnings(workId, cache.warnings_detail);
 
-  cache.creatingWorkPromise = (async () => {
-    const workId = await db.createWork(deviceId, {
-      startTime: cache.start_time ?? undefined,
-      endTime: cache.end_time ?? undefined,
-      estimatedTime: cache.estimated_time ?? undefined,
-      totalTime: cache.total_time ?? undefined,
-      interruptions: cache.interruption_count ?? cache.interruptions_count ?? 0,
-      alarms: cache.warning_count ?? cache.warnings_count ?? 0,
-      filePath: cache.json_file_path ?? undefined,
-    });
+  console.log('Saved brit_info_work for device', deviceId, {
+    workId,
+    interruptions: (cache.interruptions_detail ?? []).length,
+    warnings: (cache.warnings_detail ?? []).length,
+  });
 
-    cache.workId = workId;
-    await persistWorkDetails(deviceId, cache);
-    return workId;
-  })();
-
-  try {
-    return await cache.creatingWorkPromise;
-  } finally {
-    cache.creatingWorkPromise = null;
-  }
+  return workId;
 }
 
 export async function subscribeWorkInfo(opts: {
@@ -274,19 +222,24 @@ export async function subscribeWorkInfo(opts: {
 
     rosTool.subscribe(2, '/brit_info_work');
 
-    rosTool.onData(() => {
+    rosTool.onData(async () => {
       const value = rosTool.deviceData?.ros?.[2]?.messages?.brit_info_work;
       if (!value) return;
 
-      const next = touchCache(opts.deviceId);
+      const cache = touchCache(opts.deviceId);
+      Object.assign(cache, normalizeWorkMessage(value));
 
-      Object.assign(next, normalizeWorkMessage(value));
+      // Only process if work is complete
+      if (!isCompleteWorkMessage(cache)) {
+        return;
+      }
 
-      void persistCompletedWork(opts.deviceId, next).catch((error) => {
-        next.persistedKey = null;
-        next.workId = null;
-        console.error('Failed to persist brit_info_work data for device', opts.deviceId, error);
-      });
+      try {
+        // saveWork handles deduplication by checking if work already exists
+        await saveWork(opts.deviceId, cache);
+      } catch (error) {
+        console.error('Failed to process brit_info_work for device', opts.deviceId, error);
+      }
     }, 'ros/2/messages/brit_info_work');
 
     return rosTool;
