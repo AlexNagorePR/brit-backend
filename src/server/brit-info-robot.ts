@@ -55,6 +55,7 @@ function getTopicValue(deviceData: any, field: RobotInfoField) {
 }
 
 async function saveRobotInfo(deviceId: string, field: RobotInfoField, value: any) {
+  console.log('Saving robot info for device', deviceId, 'field:', field, 'value:', value);
   switch (field) {
     case 'fecha_ultima_limpieza': {
       const next = normalizeStringValue(value);
@@ -72,7 +73,6 @@ async function saveRobotInfo(deviceId: string, field: RobotInfoField, value: any
       break;
     }
     case 'tiempo_total_encendido': {
-      console.log('Received tiempo_total_encendido for device', deviceId, 'value:', value);
       const next = normalizeNumberValue(value);
       await db.updateRobotInfo(deviceId, { timeOn: next ?? undefined });
       break;
