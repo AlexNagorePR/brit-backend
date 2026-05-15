@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { BatteryInfo } from './types.js';
-import { Battery } from '../../domain/models/battery.js';
+import { Battery } from '@/domain/models/battery.js';
 
 function toBatteryInfo(battery: Battery): BatteryInfo {
   return {

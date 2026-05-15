@@ -1,34 +1,30 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
 import { ClientNotFoundError } from '@/application/use-cases/clients/errors.js';
-import { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
+import type { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
 import { RobotNotFoundError, RobotValidationError } from '@/application/use-cases/robots/errors.js';
-import { GetRobot } from '@/application/use-cases/robots/get-robot.js';
-import { ListRobots } from '@/application/use-cases/robots/list-robots.js';
-import { ListRobotUsers } from '@/application/use-cases/robots/list-robot-users.js';
-import { SetRobotUsers } from '@/application/use-cases/robots/set-robot-users.js';
-import { SyncRobotsFromPortal } from '@/application/use-cases/robots/sync-robots-from-portal.js';
-import { UpdateRobotClient } from '@/application/use-cases/robots/update-robot-client.js';
-import { createDbClientRepository } from '@/infrastructure/db/client-repository.js';
-import { createDbRobotRepository } from '@/infrastructure/db/robot-repository.js';
-import { createPortalApi } from '@/infrastructure/portal/portal-api.js';
+import type { GetRobot } from '@/application/use-cases/robots/get-robot.js';
+import type { ListRobots } from '@/application/use-cases/robots/list-robots.js';
+import type { ListRobotUsers } from '@/application/use-cases/robots/list-robot-users.js';
+import type { SetRobotUsers } from '@/application/use-cases/robots/set-robot-users.js';
+import type { SyncRobotsFromPortal } from '@/application/use-cases/robots/sync-robots-from-portal.js';
+import type { UpdateRobotClient } from '@/application/use-cases/robots/update-robot-client.js';
 import { requireAdmin } from '@/server/auth.js';
 
 const log = utils.getLogger('routes/admin/robots');
 
-export function createAdminRobotsRouter(config: any, db: any) {
+export type AdminRobotsRouterDeps = {
+  findClientByName: FindClientByName;
+  getRobot: GetRobot;
+  listRobots: ListRobots;
+  listRobotUsers: ListRobotUsers;
+  setRobotUsers: SetRobotUsers;
+  syncRobotsFromPortal: SyncRobotsFromPortal;
+  updateRobotClient: UpdateRobotClient;
+};
+
+export function createAdminRobotsRouter(deps: AdminRobotsRouterDeps) {
   const router = Router();
-  const findClientByName = new FindClientByName(createDbClientRepository(db));
-  const robotRepository = createDbRobotRepository(db);
-  const getRobot = new GetRobot(robotRepository);
-  const listRobots = new ListRobots(robotRepository);
-  const listRobotUsers = new ListRobotUsers(robotRepository);
-  const setRobotUsers = new SetRobotUsers(robotRepository);
-  const syncRobotsFromPortal = new SyncRobotsFromPortal(
-    createPortalApi(config),
-    robotRepository
-  );
-  const updateRobotClient = new UpdateRobotClient(robotRepository);
 
   router.post('/sync', requireAdmin, async (_req, res) => {
     /**
@@ -50,7 +46,7 @@ export function createAdminRobotsRouter(config: any, db: any) {
      *         description: Portal API request failed
      */
     try {
-      const result = await syncRobotsFromPortal.execute();
+      const result = await deps.syncRobotsFromPortal.execute();
 
       return res.json({
         ok: true,
@@ -83,7 +79,7 @@ export function createAdminRobotsRouter(config: any, db: any) {
      *         description: List failed
      */
     try {
-      const robots = await listRobots.execute();
+      const robots = await deps.listRobots.execute();
       return res.json(robots);
     } catch (err) {
       log.error('List robots failed', err);
@@ -121,7 +117,7 @@ export function createAdminRobotsRouter(config: any, db: any) {
     const robotId = req.params.robotId;
 
     try {
-      const robot = await getRobot.execute(robotId);
+      const robot = await deps.getRobot.execute(robotId);
       return res.json(robot);
     } catch (err) {
       if (err instanceof RobotNotFoundError) {
@@ -161,7 +157,7 @@ export function createAdminRobotsRouter(config: any, db: any) {
     const robotId = req.params.robotId;
 
     try {
-      const userIds = await listRobotUsers.execute(robotId);
+      const userIds = await deps.listRobotUsers.execute(robotId);
 
       return res.json({
         robotId,
@@ -215,7 +211,7 @@ export function createAdminRobotsRouter(config: any, db: any) {
     const { userIds } = req.body || {};
 
     try {
-      const result = await setRobotUsers.execute({ robotId, userIds });
+      const result = await deps.setRobotUsers.execute({ robotId, userIds });
 
       return res.json({
         ok: true,
@@ -280,7 +276,7 @@ export function createAdminRobotsRouter(config: any, db: any) {
 
     try {
       if (!clientName) {
-        const result = await updateRobotClient.execute({
+        const result = await deps.updateRobotClient.execute({
           robotId,
           clientId: null,
         });
@@ -292,9 +288,9 @@ export function createAdminRobotsRouter(config: any, db: any) {
         });
       }
 
-      const client = await findClientByName.execute(clientName);
+      const client = await deps.findClientByName.execute(clientName);
 
-      const result = await updateRobotClient.execute({
+      const result = await deps.updateRobotClient.execute({
         robotId,
         clientId: client.id,
       });

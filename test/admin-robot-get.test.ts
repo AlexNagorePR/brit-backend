@@ -6,7 +6,7 @@ const mockDb = vi.hoisted(() => ({
   getRobotById: vi.fn(),
 }));
 
-vi.mock('@/server/db.js', () => ({
+vi.mock('@/infrastructure/db/postgres/index.js', () => ({
   createDb: () => mockDb,
 }));
 
@@ -24,7 +24,7 @@ vi.mock('@/server/auth.js', () => ({
   },
 }));
 
-vi.mock('@/server/collector.js', () => ({
+vi.mock('@/application/services/collector.js', () => ({
   createCollector: () => ({
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(),

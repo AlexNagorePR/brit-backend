@@ -1,6 +1,6 @@
 import { Client } from '@/domain/models/client.js';
 import type { ClientRepository } from '@/application/ports/client-repository.js';
-import type { Db } from '@/server/db.js';
+import type { Db } from '@/infrastructure/db/postgres/index.js';
 
 type ClientDb = Pick<
   Db,

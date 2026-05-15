@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import * as commandPublisher from '@/server/device-command-publisher.js';
+import * as commandPublisher from '@/infrastructure/transitive/device-command-publisher.js';
 
-describe('device-command-publisher', () => {
+describe('transitive device command publisher', () => {
   describe('validateCommandMessage', () => {
     it('should reject ink_level with invalid value', () => {
       expect(() => {

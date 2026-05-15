@@ -1,25 +1,26 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
-import { CreateClient } from '@/application/use-cases/clients/create-client.js';
-import { DeleteClient } from '@/application/use-cases/clients/delete-client.js';
+import type { CreateClient } from '@/application/use-cases/clients/create-client.js';
+import type { DeleteClient } from '@/application/use-cases/clients/delete-client.js';
 import {
   ClientNotFoundError,
   ClientValidationError,
 } from '@/application/use-cases/clients/errors.js';
-import { GetClient } from '@/application/use-cases/clients/get-client.js';
-import { ListClients } from '@/application/use-cases/clients/list-clients.js';
-import { createDbClientRepository } from '@/infrastructure/db/client-repository.js';
+import type { GetClient } from '@/application/use-cases/clients/get-client.js';
+import type { ListClients } from '@/application/use-cases/clients/list-clients.js';
 import { requireAdmin } from '@/server/auth.js';
 
 const log = utils.getLogger('routes/admin/clients');
 
-export function createAdminClientsRouter(_config: any, db: any) {
+export type AdminClientsRouterDeps = {
+  listClients: ListClients;
+  createClient: CreateClient;
+  getClient: GetClient;
+  deleteClient: DeleteClient;
+};
+
+export function createAdminClientsRouter(deps: AdminClientsRouterDeps) {
   const router = Router();
-  const clientRepository = createDbClientRepository(db);
-  const listClients = new ListClients(clientRepository);
-  const createClient = new CreateClient(clientRepository);
-  const getClient = new GetClient(clientRepository);
-  const deleteClient = new DeleteClient(clientRepository);
 
   router.get('/', requireAdmin, async (_req, res) => {
     /**
@@ -55,7 +56,7 @@ export function createAdminClientsRouter(_config: any, db: any) {
      *         description: List failed
      */
     try {
-      const clients = await listClients.execute();
+      const clients = await deps.listClients.execute();
       return res.json(clients);
     } catch (err) {
       log.error('List clients failed', err);
@@ -98,7 +99,7 @@ export function createAdminClientsRouter(_config: any, db: any) {
     const { name } = req.body || {};
 
     try {
-      const client = await createClient.execute({ name });
+      const client = await deps.createClient.execute({ name });
       return res.status(201).json({
         ok: true,
         ...client,
@@ -143,7 +144,7 @@ export function createAdminClientsRouter(_config: any, db: any) {
     const clientId = req.params.id;
 
     try {
-      const client = await getClient.execute(clientId);
+      const client = await deps.getClient.execute(clientId);
       return res.json(client);
     } catch (err) {
       if (err instanceof ClientNotFoundError) {
@@ -185,7 +186,7 @@ export function createAdminClientsRouter(_config: any, db: any) {
     const clientId = req.params.id;
 
     try {
-      const result = await deleteClient.execute(clientId);
+      const result = await deps.deleteClient.execute(clientId);
       return res.json({
         ok: true,
         ...result,

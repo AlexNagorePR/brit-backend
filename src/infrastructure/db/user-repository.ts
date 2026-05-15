@@ -1,9 +1,9 @@
 import { User } from '@/domain/models/user.js';
 import type {
-  CognitoUserSyncItem,
+  IdentityUserSyncItem,
   UserRepository,
 } from '@/application/ports/user-repository.js';
-import type { Db } from '@/server/db.js';
+import type { Db } from '@/infrastructure/db/postgres/index.js';
 
 type UserDb = Pick<
   Db,
@@ -14,7 +14,7 @@ type UserDb = Pick<
   | 'getUserByEmail'
   | 'updateUserClient'
   | 'deleteUser'
-  | 'syncCognitoUsers'
+  | 'syncIdentityUsers'
 >;
 
 function toDomainUser(user: {
@@ -59,8 +59,8 @@ export function createDbUserRepository(db: UserDb): UserRepository {
       return db.deleteUser(userId);
     },
 
-    syncCognitoUsers(users: CognitoUserSyncItem[]): Promise<void> {
-      return db.syncCognitoUsers(users);
+    syncIdentityUsers(users: IdentityUserSyncItem[]): Promise<void> {
+      return db.syncIdentityUsers(users);
     },
   };
 }

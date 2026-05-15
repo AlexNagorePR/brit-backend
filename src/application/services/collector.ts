@@ -1,27 +1,30 @@
 import utils from '@transitive-sdk/utils';
 
+import type { DeviceInfoSubscriber } from '@/application/ports/device-info-subscriber.js';
+import type { DeviceTelemetryStream } from '@/application/ports/device-telemetry-stream.js';
 import type { PortalApi } from '@/application/ports/portal-api.js';
-import { createPortalApi } from '@/infrastructure/portal/portal-api.js';
-import type { Db, RobotInfo } from '@/server/db.js';
-import { subscribeTelemetry } from '@/server/device-data-stream.js';
-import { subscribeWorkInfo } from '@/server/brit-info-work.js';
-import { subscribeRobotInfo } from '@/server/brit-info-robot.js';
+import type {
+  RobotReadModel,
+  RobotRepository,
+} from '@/application/ports/robot-repository.js';
 
 const log = utils.getLogger('collector');
 log.setLevel('debug');
 
 type CollectorDeps = {
-  db: Db;
-  jwtSecret: string;
-  transitiveUser: string;
-  portalApi?: PortalApi;
+  robotRepository: Pick<RobotRepository, 'list'>;
+  portalApi: PortalApi;
+  telemetryStream: DeviceTelemetryStream;
+  workInfoSubscriber: DeviceInfoSubscriber;
+  robotInfoSubscriber: DeviceInfoSubscriber;
 };
 
 class CollectorService {
-  private db: Db;
-  private jwtSecret: string;
-  private transitiveUser: string;
+  private robotRepository: Pick<RobotRepository, 'list'>;
   private portalApi: PortalApi;
+  private telemetryStream: DeviceTelemetryStream;
+  private workInfoSubscriber: DeviceInfoSubscriber;
+  private robotInfoSubscriber: DeviceInfoSubscriber;
 
   private started = false;
   private telemetrySubscribedDevices = new Set<string>();
@@ -30,13 +33,11 @@ class CollectorService {
   private refreshTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: CollectorDeps) {
-    this.db = deps.db;
-    this.jwtSecret = deps.jwtSecret;
-    this.transitiveUser = deps.transitiveUser;
-    this.portalApi = deps.portalApi ?? createPortalApi({
-      jwtSecret: deps.jwtSecret,
-      transitiveUser: deps.transitiveUser,
-    });
+    this.robotRepository = deps.robotRepository;
+    this.portalApi = deps.portalApi;
+    this.telemetryStream = deps.telemetryStream;
+    this.workInfoSubscriber = deps.workInfoSubscriber;
+    this.robotInfoSubscriber = deps.robotInfoSubscriber;
   }
 
   async start() {
@@ -68,34 +69,36 @@ class CollectorService {
   }
 
   async refreshRobots() {
-    let robots: RobotInfo[];
+    let robots: RobotReadModel[];
 
     try {
-      robots = await this.db.getAllRobots();
+      robots = await this.robotRepository.list();
     } catch (err) {
-      log.error('Collector failed to load robots from DB', err);
+      log.error('Collector failed to load robots', err);
       return;
     }
 
     const runningMap = await this.loadRunningRobots();
 
-    robots = [{
-      id: 'd_b440cd1',
-      clientId: '35f22242-715b-448c-9c1e-c0d378f27d6f',
-      hostName: 'b440cd1',
-      robotName: 'b440cd1',
-      userEmails: [ 'alex.nagore@phenomenonrobotics.com' ]
-    }];
-
     for (const robot of robots) {
-      // Subscribe to brit-info-work for all robots
-      await this.ensureBritInfoWorkSubscribed(robot.id);
-      await this.ensureBritInfoRobotSubscribed(robot.id);
-
       const runningInfo = runningMap[robot.id];
       const hasRosTool = Boolean(
         runningInfo?.['@transitive-robotics']?.['ros-tool']
       );
+      const hasBritInfo = Boolean(
+        runningInfo?.['@transitive-robotics']?.['brit-info']
+      );
+      const hasBritInfoWork = Boolean(
+        runningInfo?.['@transitive-robotics']?.['brit-info-work']
+      );
+
+      if (hasBritInfoWork || hasBritInfo) {
+        await this.ensureBritInfoWorkSubscribed(robot.id);
+      }
+
+      if (hasBritInfo) {
+        await this.ensureBritInfoRobotSubscribed(robot.id);
+      }
 
       if (hasRosTool) {
         await this.ensureTelemetrySubscribed(robot.id);
@@ -111,11 +114,7 @@ class CollectorService {
     try {
       log.info('Collector subscribing telemetry', { deviceId });
 
-      await subscribeTelemetry({
-        jwtSecret: this.jwtSecret,
-        transitiveUser: this.transitiveUser,
-        deviceId,
-      });
+      await this.telemetryStream.subscribe(deviceId);
 
       this.telemetrySubscribedDevices.add(deviceId);
 
@@ -133,11 +132,7 @@ class CollectorService {
     try {
       log.info('Collector subscribing brit-info-work', { deviceId });
 
-      await subscribeWorkInfo({
-        jwtSecret: this.jwtSecret,
-        transitiveUser: this.transitiveUser,
-        deviceId,
-      });
+      await this.workInfoSubscriber.subscribe(deviceId);
 
       this.britInfoWorkSubscribedDevices.add(deviceId);
 
@@ -155,11 +150,7 @@ class CollectorService {
     try {
       log.info('Collector subscribing brit-info-robot', { deviceId });
 
-      await subscribeRobotInfo({
-        jwtSecret: this.jwtSecret,
-        transitiveUser: this.transitiveUser,
-        deviceId,
-      });
+      await this.robotInfoSubscriber.subscribe(deviceId);
 
       this.britInfoRobotSubscribedDevices.add(deviceId);
 

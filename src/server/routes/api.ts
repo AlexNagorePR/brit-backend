@@ -1,26 +1,32 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import utils from '@transitive-sdk/utils';
-import { ListRunningDevices } from '@/application/use-cases/devices/list-running-devices.js';
+import type { DeviceCommandPublisher } from '@/application/ports/device-command-publisher.js';
+import type { DeviceTelemetryStream } from '@/application/ports/device-telemetry-stream.js';
+import type { ListRunningDevices } from '@/application/use-cases/devices/list-running-devices.js';
 import { RobotValidationError } from '@/application/use-cases/robots/errors.js';
-import { ListRobotsForUser } from '@/application/use-cases/robots/list-robots-for-user.js';
-import { UpdateRobotName } from '@/application/use-cases/robots/update-robot-name.js';
-import { createDbRobotRepository } from '@/infrastructure/db/robot-repository.js';
-import { createPortalApi } from '@/infrastructure/portal/portal-api.js';
+import type { ListRobotsForUser } from '@/application/use-cases/robots/list-robots-for-user.js';
+import type { UpdateRobotName } from '@/application/use-cases/robots/update-robot-name.js';
 import { requireLogin } from '@/server/auth.js';
-import { getTelemetryData, subscribeTelemetry } from '@/server/device-data-stream.js';
-import { initializeCommandPublisher, publishCommand } from '@/server/device-command-publisher.js';
-import type { Db } from '@/server/db.js';
 import type { RobotReadModel } from '@/application/ports/robot-repository.js';
 
 const log = utils.getLogger('routes/api');
 
-export function createApiRouter(config: any, db: Db) {
+type ApiRouterConfig = {
+  jwtSecret: string;
+  transitiveUser: string;
+};
+
+export type ApiRouterDeps = {
+  listRunningDevices: ListRunningDevices;
+  listRobotsForUser: ListRobotsForUser;
+  updateRobotName: UpdateRobotName;
+  telemetryStream: DeviceTelemetryStream;
+  commandPublisher: DeviceCommandPublisher;
+};
+
+export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
   const router = Router();
-  const robotRepository = createDbRobotRepository(db);
-  const listRunningDevices = new ListRunningDevices(createPortalApi(config));
-  const listRobotsForUser = new ListRobotsForUser(robotRepository);
-  const updateRobotName = new UpdateRobotName(robotRepository);
 
   // Basic auth status
   /**
@@ -208,22 +214,20 @@ export function createApiRouter(config: any, db: Db) {
 
     let robots: RobotReadModel[];
     try {
-      robots = await listRobotsForUser.execute(userEmail);
+      robots = await deps.listRobotsForUser.execute(userEmail);
     } catch (err) {
       log.error('DB failed on /api/devices', err);
       return res.status(500).json({ error: 'Devices failed' });
     }
 
     try {
-      const results = await listRunningDevices.execute(robots);
+      const results = await deps.listRunningDevices.execute(robots);
 
       for (const device of results) {
         if (device.hasRosTool) {
-          subscribeTelemetry({
-            jwtSecret: config.jwtSecret,
-            transitiveUser: config.transitiveUser,
-            deviceId: device.id,
-          }).catch(err => log.error(`Battery subscribe failed for ${device.id}`, err));
+          deps.telemetryStream
+            .subscribe(device.id)
+            .catch(err => log.error(`Telemetry subscribe failed for ${device.id}`, err));
         }
       }
 
@@ -275,7 +279,7 @@ export function createApiRouter(config: any, db: Db) {
      */
     return res.json({
       deviceId: req.params.deviceId,
-      telemetry: getTelemetryData(req.params.deviceId),
+      telemetry: deps.telemetryStream.getData(req.params.deviceId),
     });
   });
 
@@ -322,7 +326,7 @@ export function createApiRouter(config: any, db: Db) {
 
     let robots: RobotReadModel[];
     try {
-      robots = await listRobotsForUser.execute(userEmail);
+      robots = await deps.listRobotsForUser.execute(userEmail);
     } catch (err) {
       log.error('DB failed on /api/robots', err);
       return res.status(500).json({ error: 'Devices failed' });
@@ -395,7 +399,7 @@ export function createApiRouter(config: any, db: Db) {
     }
 
     try {
-      const robots = await listRobotsForUser.execute(userEmail);
+      const robots = await deps.listRobotsForUser.execute(userEmail);
 
       const hasAccess = isAdmin || robots.some((robot) => robot.id === robotId);
 
@@ -403,7 +407,7 @@ export function createApiRouter(config: any, db: Db) {
         return res.status(403).json({ error: 'Robot not found' });
       }
 
-      const result = await updateRobotName.execute({
+      const result = await deps.updateRobotName.execute({
         id: robotId,
         name,
       });
@@ -501,7 +505,7 @@ export function createApiRouter(config: any, db: Db) {
 
     try {
       // Check if user has access to this device
-      const robots = await listRobotsForUser.execute(userEmail);
+      const robots = await deps.listRobotsForUser.execute(userEmail);
       const hasAccess = isAdmin || robots.some((robot) => robot.id === deviceId);
 
       if (!hasAccess) {
@@ -509,14 +513,10 @@ export function createApiRouter(config: any, db: Db) {
       }
 
       // Initialize command publisher for this device
-      await initializeCommandPublisher({
-        jwtSecret: config.jwtSecret,
-        transitiveUser: config.transitiveUser,
-        deviceId,
-      });
+      await deps.commandPublisher.initialize(deviceId);
 
       // Publish the command
-      await publishCommand(deviceId, topic, message);
+      await deps.commandPublisher.publish(deviceId, topic, message);
 
       return res.json({
         ok: true,

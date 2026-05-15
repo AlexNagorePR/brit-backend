@@ -1,17 +1,34 @@
-import express, { Router } from 'express';
-import { generators } from 'openid-client';
+import { Router, type Request } from 'express';
 import utils from '@transitive-sdk/utils';
+import type { AuthenticationProvider } from '@/application/ports/authentication-provider.js';
+import type { BuildAuthLogoutUrl } from '@/application/use-cases/auth/build-auth-logout-url.js';
+import type { CompleteAuthCallback } from '@/application/use-cases/auth/complete-auth-callback.js';
+import {
+  AuthCallbackRejectedError,
+  AuthProviderUnavailableError,
+  ExpiredAuthStateError,
+  InvalidAuthStateError,
+} from '@/application/use-cases/auth/errors.js';
+import type { StartAuthLogin } from '@/application/use-cases/auth/start-auth-login.js';
 import { login } from '@/server/auth.js';
 
 const log = utils.getLogger('routes/auth');
 
-type OidcClientLike = {
-  authorizationUrl(args: any): string;
-  callbackParams(req: any): any;
-  callback(redirectUri: string, params: any, checks: any): Promise<{ claims(): any }>;
+type AuthRouterConfig = {
+  postLoginRedirectUrl: string;
 };
 
-export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
+export type AuthRouterDeps = {
+  readCallbackParams: AuthenticationProvider['readCallbackParams'];
+  startAuthLogin: StartAuthLogin;
+  completeAuthCallback: CompleteAuthCallback;
+  buildAuthLogoutUrl: BuildAuthLogoutUrl;
+};
+
+export function createAuthRouter(
+  config: AuthRouterConfig,
+  deps: AuthRouterDeps
+) {
   const router = Router();
 
   // OIDC login
@@ -20,32 +37,32 @@ export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
    * /auth/login:
    *   get:
    *     summary: Start OIDC authentication flow
-   *     description: Initiates the OpenID Connect login flow with Cognito
+   *     description: Initiates the OpenID Connect login flow with the identity provider
    *     tags:
    *       - Authentication
    *     responses:
    *       302:
-   *         description: Redirects to Cognito authentication server
+   *         description: Redirects to the identity provider authentication server
    *       500:
    *         description: OIDC client not initialized
    */
   router.get('/login', (req: any, res) => {
-    if (!oidcClient) return res.status(500).send('OIDC client not initialized');
+    try {
+      const result = deps.startAuthLogin.execute();
 
-    const nonce = generators.nonce();
-    const state = generators.state();
+      req.session.oidc ||= {};
+      req.session.oidc.pending ||= {};
+      req.session.oidc.pending[result.challenge.state] = result.challenge;
 
-    req.session.oidc ||= {};
-    req.session.oidc.pending ||= {};
-    req.session.oidc.pending[state] = { nonce, ts: Date.now() };
+      return res.redirect(result.authorizationUrl);
+    } catch (err) {
+      if (err instanceof AuthProviderUnavailableError) {
+        return res.status(500).send(err.message);
+      }
 
-    const authUrl = oidcClient.authorizationUrl({
-      scope: 'email openid phone',
-      state,
-      nonce,
-    });
-
-    return res.redirect(authUrl);
+      log.error('Login error', err);
+      return res.status(500).send(`Login error: ${(err as Error)?.message || err}`);
+    }
   });
 
   // OIDC callback
@@ -63,7 +80,7 @@ export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
    *         required: true
    *         schema:
    *           type: string
-   *         description: Authorization code from Cognito
+   *         description: Authorization code from the identity provider
    *       - in: query
    *         name: state
    *         required: true
@@ -85,63 +102,49 @@ export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
    */
   router.get('/callback', async (req: any, res) => {
     try {
-      if (!oidcClient) return res.status(500).send('OIDC client not initialized');
+      const params = deps.readCallbackParams(req);
+      const returnedState = typeof params.state === 'string' ? params.state : undefined;
+      const pending = returnedState ? req.session?.oidc?.pending?.[returnedState] : undefined;
 
-      if (req.query?.error) {
-        log.error('OIDC error on callback', req.query);
-        return res.status(400).send(`OIDC error: ${req.query.error}`);
-      }
+      const result = await deps.completeAuthCallback.execute({ params, pending });
+      deletePendingState(req, result.state);
 
-      const params = oidcClient.callbackParams(req);
-      const returnedState = params.state;
-
-      const pending = req.session?.oidc?.pending?.[returnedState];
-      if (!pending) {
-        log.warn('OIDC callback with unknown/expired state', { returnedState });
-        return res.status(400).send('Invalid/expired state. Please try again.');
-      }
-
-      const OIDC_STATE_TTL_MS = 10 * 60 * 1000;
-      if (Date.now() - pending.ts > OIDC_STATE_TTL_MS) {
-        if (req.session?.oidc?.pending) delete req.session.oidc.pending[returnedState];
-        return res.status(400).send('Login expired. Please try again.');
-      }
-
-      if (req.session?.oidc?.pending) delete req.session.oidc!.pending![returnedState];
-
-      const tokenSet = await oidcClient.callback(
-        config.cognitoRedirectUri,
-        params,
-        { nonce: pending.nonce, state: returnedState }
-      );
-
-      const claims = tokenSet.claims();
-      const groups: string[] = (claims['cognito:groups'] as string[]) || [];
-
-      if (!groups.includes('allowed')) {
+      if (result.kind === 'not_allowed') {
         return req.session.destroy(() => {
           res.clearCookie('connect.sid');
-          return res.redirect(`${config.postLoginRedirectUrl}?error=not_allowed`)
+          return res.redirect(`${config.postLoginRedirectUrl}?error=not_allowed`);
         });
       }
 
-      const email = claims.email as string;
-      const userId = email || (claims.sub as string);
-
-      const accountLike = {
-        _id: userId,
-        email: email || '',
-        admin: groups.includes('admin'),
-        verified: true,
-        created: new Date(),
-      };
-
-      return login(req, res, { account: accountLike, redirect: config.postLoginRedirectUrl });
+      return login(req, res, {
+        account: result.account,
+        redirect: config.postLoginRedirectUrl,
+      });
     } catch (err: any) {
       if (res.headersSent) {
         log.error('Callback error after headers sent', err);
         return;
       }
+
+      if (err instanceof AuthProviderUnavailableError) {
+        return res.status(500).send(err.message);
+      }
+
+      if (err instanceof AuthCallbackRejectedError) {
+        log.error('OIDC error on callback', req.query);
+        return res.status(400).send(err.message);
+      }
+
+      if (err instanceof InvalidAuthStateError) {
+        log.warn('OIDC callback with unknown/expired state', { returnedState: err.state });
+        return res.status(400).send(err.message);
+      }
+
+      if (err instanceof ExpiredAuthStateError) {
+        deletePendingState(req, err.state);
+        return res.status(400).send(err.message);
+      }
+
       log.error('Callback error', err);
       return res.status(500).send(`Callback error: ${err?.message || err}`);
     }
@@ -153,23 +156,27 @@ export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
    * /auth/logout:
    *   get:
    *     summary: Logout the current user
-   *     description: Destroys the user session and redirects to Cognito logout
+   *     description: Destroys the user session and redirects to the identity provider logout
    *     tags:
    *       - Authentication
    *     responses:
    *       302:
-   *         description: Redirects to Cognito logout endpoint
+   *         description: Redirects to the identity provider logout endpoint
    */
   router.get('/logout', (req: any, res) => {
+    const logoutUrl = deps.buildAuthLogoutUrl.execute();
+
     req.session.destroy(() => {
       res.clearCookie('connect.sid');
-      const url =
-        `https://${config.cognitoDomain}/logout` +
-        `?client_id=${encodeURIComponent(config.cognitoClientId)}` +
-        `&logout_uri=${encodeURIComponent(config.cognitoLogoutUri)}`;
-      return res.redirect(url);
+      return res.redirect(logoutUrl);
     });
   });
 
   return router;
+}
+
+function deletePendingState(req: Request, state: string) {
+  if (req.session?.oidc?.pending) {
+    delete req.session.oidc.pending[state];
+  }
 }

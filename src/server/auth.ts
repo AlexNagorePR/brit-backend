@@ -1,14 +1,10 @@
 import utils from '@transitive-sdk/utils';
+import type { AuthenticatedAccount } from '@/application/use-cases/auth/authenticated-account.js';
 
 const log = utils.getLogger('auth');
 log.setLevel('debug');
 
-export interface AccountLike {
-    _id: string;
-    email?: string;
-    admin?: boolean;
-    verified?: boolean;
-}
+export type AccountLike = AuthenticatedAccount;
 
 function wantsJson(req: any): boolean {
   if (req.path?.startsWith('/api/')) return true;

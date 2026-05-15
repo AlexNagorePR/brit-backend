@@ -1,43 +1,44 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
 import { ClientNotFoundError } from '@/application/use-cases/clients/errors.js';
-import { FindClientById } from '@/application/use-cases/clients/find-client-by-id.js';
-import { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
-import { CreateUser } from '@/application/use-cases/users/create-user.js';
-import { DeleteUser } from '@/application/use-cases/users/delete-user.js';
+import type { FindClientById } from '@/application/use-cases/clients/find-client-by-id.js';
+import type { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
+import type { CreateUser } from '@/application/use-cases/users/create-user.js';
+import type { DeleteUser } from '@/application/use-cases/users/delete-user.js';
 import { UserNotFoundError } from '@/application/use-cases/users/errors.js';
-import { FindUserById } from '@/application/use-cases/users/find-user-by-id.js';
-import { ListUsers } from '@/application/use-cases/users/list-users.js';
-import { ListUsersByClient } from '@/application/use-cases/users/list-users-by-client.js';
-import { SyncCognitoUsers } from '@/application/use-cases/users/sync-cognito-users.js';
-import { UpdateUserClient } from '@/application/use-cases/users/update-user-client.js';
-import { createDbClientRepository } from '@/infrastructure/db/client-repository.js';
-import { createDbUserRepository } from '@/infrastructure/db/user-repository.js';
+import type { FindUserById } from '@/application/use-cases/users/find-user-by-id.js';
+import type { ListUsers } from '@/application/use-cases/users/list-users.js';
+import type { ListUsersByClient } from '@/application/use-cases/users/list-users-by-client.js';
+import type { SyncIdentityUsers } from '@/application/use-cases/users/sync-identity-users.js';
+import type { UpdateUserClient } from '@/application/use-cases/users/update-user-client.js';
+import type { UserIdentityProvider } from '@/application/ports/user-identity-provider.js';
 import { requireAdmin } from '@/server/auth.js';
 
 const log = utils.getLogger('routes/admin/users');
 
-export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) {
+export type AdminUsersRouterDeps = {
+  userIdentityProvider: UserIdentityProvider;
+  findClientById: FindClientById;
+  findClientByName: FindClientByName;
+  createUser: CreateUser;
+  deleteUser: DeleteUser;
+  findUserById: FindUserById;
+  listUsers: ListUsers;
+  listUsersByClient: ListUsersByClient;
+  syncIdentityUsers: SyncIdentityUsers;
+  updateUserClient: UpdateUserClient;
+};
+
+export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
   const router = Router();
-  const clientRepository = createDbClientRepository(db);
-  const findClientById = new FindClientById(clientRepository);
-  const findClientByName = new FindClientByName(clientRepository);
-  const userRepository = createDbUserRepository(db);
-  const createUser = new CreateUser(userRepository);
-  const deleteUser = new DeleteUser(userRepository);
-  const findUserById = new FindUserById(userRepository);
-  const listUsers = new ListUsers(userRepository);
-  const listUsersByClient = new ListUsersByClient(userRepository);
-  const syncCognitoUsers = new SyncCognitoUsers(userRepository);
-  const updateUserClient = new UpdateUserClient(userRepository);
 
   router.get('/', requireAdmin, async (_req, res) => {
     /**
      * @swagger
      * /admin/users:
      *   get:
-     *     summary: List all users from Cognito and database
-     *     description: Fetches all users from Cognito, syncs them with the database, and returns both lists
+     *     summary: List all users from the identity provider and database
+     *     description: Fetches all users from the identity provider, syncs them with the database, and returns both lists
      *     tags:
      *       - Admin - Users
      *     security:
@@ -50,7 +51,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *             schema:
      *               type: object
      *               properties:
-     *                 cognitoUsers:
+     *                 identityUsers:
      *                   type: array
      *                   items:
      *                     type: object
@@ -81,38 +82,38 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *       401:
      *         description: User not authenticated or not admin
      *       502:
-     *         description: Error fetching users from Cognito
+     *         description: Error fetching users from the identity provider
      */
     try {
-      log.info('Fetching Cognito users...');
-      const cognitoUsers = await cognitoAdmin.listUsers();
-      log.info(`Fetched ${cognitoUsers.length} users from Cognito`);
+      log.info('Fetching identity users...');
+      const identityUsers = await deps.userIdentityProvider.listUsers();
+      log.info(`Fetched ${identityUsers.length} users from identity provider`);
 
-      const usersToSync = cognitoUsers
+      const usersToSync = identityUsers
         .filter((u: any) => u.username && u.attributes?.email)
         .map((u: any) => ({ username: u.username, email: u.attributes.email }));
 
       log.info(`Syncing ${usersToSync.length} users to database`, { users: usersToSync });
 
       try {
-        await syncCognitoUsers.execute(usersToSync);
+        await deps.syncIdentityUsers.execute(usersToSync);
         log.info('Users synced to database successfully');
       } catch (syncErr) {
         log.error('Failed to sync users to database', { error: syncErr });
-        // Don't fail the response, still return Cognito users even if sync fails
+        // Don't fail the response, still return identity users even if sync fails.
       }
 
       // Also get users from DB to return enriched data
       let dbUsers: any[] = [];
       try {
-        dbUsers = await listUsers.execute();
+        dbUsers = await deps.listUsers.execute();
         log.info(`Fetched ${dbUsers.length} users from database`, { users: dbUsers });
       } catch (dbErr) {
         log.error('Failed to fetch users from database', { error: dbErr });
       }
 
       return res.json({
-        cognitoUsers,
+        identityUsers,
         dbUsers,
         synced: true,
       });
@@ -127,8 +128,8 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      * @swagger
      * /admin/users/sync:
      *   post:
-     *     summary: Manually sync users from Cognito to database
-     *     description: Fetches all users from Cognito and synchronizes them with the database
+     *     summary: Manually sync users from the identity provider to database
+     *     description: Fetches all users from the identity provider and synchronizes them with the database
      *     tags:
      *       - Admin - Users
      *     security:
@@ -143,20 +144,20 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      */
     log.info('Manual sync request for users');
     try {
-      log.info('Fetching all users from Cognito...');
-      const cognitoUsers = await cognitoAdmin.listUsers();
-      log.info(`Fetched ${cognitoUsers.length} users from Cognito`, {
-        users: cognitoUsers.map((u: any) => ({ username: u.username, email: u.attributes?.email })),
+      log.info('Fetching all identity users...');
+      const identityUsers = await deps.userIdentityProvider.listUsers();
+      log.info(`Fetched ${identityUsers.length} users from identity provider`, {
+        users: identityUsers.map((u: any) => ({ username: u.username, email: u.attributes?.email })),
       });
 
-      const usersToSync = cognitoUsers
+      const usersToSync = identityUsers
         .filter((u: any) => u.username && u.attributes?.email)
         .map((u: any) => ({ username: u.username, email: u.attributes.email }));
 
-      log.info(`Extracted ${usersToSync.length} users from Cognito`, { users: usersToSync });
+      log.info(`Extracted ${usersToSync.length} users from identity provider`, { users: usersToSync });
 
       log.info(`Syncing to database`);
-      const result = await syncCognitoUsers.execute(usersToSync);
+      const result = await deps.syncIdentityUsers.execute(usersToSync);
       log.info('Sync completed successfully');
 
       return res.json({
@@ -176,7 +177,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      * /admin/users:
      *   post:
      *     summary: Create a new user
-     *     description: Creates a new user in Cognito and stores them in the database
+     *     description: Creates a new user in the identity provider and stores them in the database
      *     tags:
      *       - Admin - Users
      *     security:
@@ -211,7 +212,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *       401:
      *         description: User not authenticated or not admin
      *       502:
-     *         description: Cognito operation failed
+     *         description: Identity provider operation failed
      */
     const { email, groups, temporaryPassword, givenName, familyName, clientId } = req.body || {};
 
@@ -233,17 +234,17 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     }
 
     try {
-      log.info('Creating user in Cognito', { email });
-      const user = await cognitoAdmin.createUser({
+      log.info('Creating user in identity provider', { email });
+      const user = await deps.userIdentityProvider.createUser({
         email,
         temporaryPassword,
         givenName,
         familyName,
         groups,
       });
-      log.info('User created in Cognito successfully', { email });
+      log.info('User created in identity provider successfully', { email });
 
-      await createUser.execute({
+      await deps.createUser.execute({
         id: user.username,
         email,
         clientId,
@@ -279,7 +280,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     try {
       log.info('Fetching all users from database');
       
-      const users = await listUsers.execute();
+      const users = await deps.listUsers.execute();
       log.info(`Fetched ${users.length} users from database`, { users });
 
       return res.json({
@@ -298,7 +299,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      * /admin/users/{username}:
      *   get:
      *     summary: Get user by username
-     *     description: Retrieves information about a specific user from Cognito
+     *     description: Retrieves information about a specific user from the identity provider
      *     tags:
      *       - Admin - Users
      *     security:
@@ -317,13 +318,13 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *       404:
      *         description: User not found
      *       502:
-     *         description: Cognito operation failed
+     *         description: Identity provider operation failed
      */
     try {
-      const user = await cognitoAdmin.getUser(req.params.username);
+      const user = await deps.userIdentityProvider.getUser(req.params.username);
       return res.json(user);
     } catch (err: any) {
-      log.error('Cognito get user failed', err);
+      log.error('Identity provider get user failed', err);
 
       if (err?.name === 'UserNotFoundException') {
         return res.status(404).json({ error: 'User not found' });
@@ -369,7 +370,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *       401:
      *         description: User not authenticated or not admin
      *       502:
-     *         description: Cognito operation failed
+     *         description: Identity provider operation failed
      */
     const username = req.params.username;
     const { groups } = req.body || {};
@@ -394,23 +395,23 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     }
 
     try {
-      const user = await cognitoAdmin.getUser(username);
+      const user = await deps.userIdentityProvider.getUser(username);
       const currentGroups = user.groups || [];
 
       const groupsToAdd = normalizedGroups.filter((g) => !currentGroups.includes(g));
       const groupsToRemove = currentGroups.filter((g: string) => !normalizedGroups.includes(g));
 
       if (groupsToAdd.length > 0) {
-        await cognitoAdmin.addUserToGroups(username, groupsToAdd);
+        await deps.userIdentityProvider.addUserToGroups(username, groupsToAdd);
       }
 
       if (groupsToRemove.length > 0) {
-        await cognitoAdmin.removeUserFromGroups(username, groupsToRemove);
+        await deps.userIdentityProvider.removeUserFromGroups(username, groupsToRemove);
       }
 
-      const updatedUser = await cognitoAdmin.getUser(username);
-      const dbUser = await findUserById.execute(username);
-      const client = dbUser?.clientId ? await findClientById.execute(dbUser.clientId) : null;
+      const updatedUser = await deps.userIdentityProvider.getUser(username);
+      const dbUser = await deps.findUserById.execute(username);
+      const client = dbUser?.clientId ? await deps.findClientById.execute(dbUser.clientId) : null;
 
       return res.json({
         ...updatedUser,
@@ -429,7 +430,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      * /admin/users/{username}/disable:
      *   post:
      *     summary: Disable a user
-     *     description: Disables a user account in Cognito
+     *     description: Disables a user account in the identity provider
      *     tags:
      *       - Admin - Users
      *     security:
@@ -448,13 +449,13 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *       404:
      *         description: User not found
      *       502:
-     *         description: Cognito operation failed
+     *         description: Identity provider operation failed
      */
     try {
-      await cognitoAdmin.disableUser(req.params.username);
+      await deps.userIdentityProvider.disableUser(req.params.username);
       return res.json({ ok: true, username: req.params.username, enabled: false });
     } catch (err: any) {
-      log.error('Cognito disable user failed', err);
+      log.error('Identity provider disable user failed', err);
 
       if (err?.name === 'UserNotFoundException') {
         return res.status(404).json({ error: 'User not found' });
@@ -470,7 +471,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      * /admin/users/{username}/enable:
      *   post:
      *     summary: Enable a user
-     *     description: Enables a disabled user account in Cognito
+     *     description: Enables a disabled user account in the identity provider
      *     tags:
      *       - Admin - Users
      *     security:
@@ -489,13 +490,13 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *       404:
      *         description: User not found
      *       502:
-     *         description: Cognito operation failed
+     *         description: Identity provider operation failed
      */
     try {
-      await cognitoAdmin.enableUser(req.params.username);
+      await deps.userIdentityProvider.enableUser(req.params.username);
       return res.json({ ok: true, username: req.params.username, enabled: true });
     } catch (err: any) {
-      log.error('Cognito enable user failed', err);
+      log.error('Identity provider enable user failed', err);
 
       if (err?.name === 'UserNotFoundException') {
         return res.status(404).json({ error: 'User not found' });
@@ -555,7 +556,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     }
 
     try {
-      const user = await updateUserClient.execute({
+      const user = await deps.updateUserClient.execute({
         userId: username,
         clientId,
       });
@@ -584,7 +585,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      * /admin/users/{username}:
      *   delete:
      *     summary: Delete a user
-     *     description: Deletes a user from Cognito and database. Cannot delete your own account
+     *     description: Deletes a user from the identity provider and database. Cannot delete your own account
      *     tags:
      *       - Admin - Users
      *     security:
@@ -603,7 +604,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
      *       401:
      *         description: User not authenticated or not admin
      *       502:
-     *         description: Cognito operation failed
+     *         description: Identity provider operation failed
      */
     const username = req.params.username;
 
@@ -614,9 +615,9 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     }
 
     try {
-      await cognitoAdmin.deleteUser(username);
+      await deps.userIdentityProvider.deleteUser(username);
 
-      await deleteUser.execute(username);
+      await deps.deleteUser.execute(username);
 
       return res.json({ ok: true, username });
     } catch (err) {
@@ -655,9 +656,9 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     const clientName = req.params.clientName;
 
     try {
-      const client = await findClientByName.execute(clientName);
+      const client = await deps.findClientByName.execute(clientName);
 
-      const users = await listUsersByClient.execute(client.id);
+      const users = await deps.listUsersByClient.execute(client.id);
 
       return res.json({
         clientId: client.id,

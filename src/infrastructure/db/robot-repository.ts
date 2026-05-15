@@ -4,7 +4,7 @@ import type {
   RobotReadModel,
   RobotRepository,
 } from '@/application/ports/robot-repository.js';
-import type { Db } from '@/server/db.js';
+import type { Db } from '@/infrastructure/db/postgres/index.js';
 
 type RobotDb = Pick<
   Db,

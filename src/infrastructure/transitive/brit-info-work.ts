@@ -1,6 +1,6 @@
 import { signRosToolJWT } from "@/server/portal.js";
-import { createDb } from "@/server/db.js";
-import { loadConfig } from "./config.js";
+import type { DeviceInfoSubscriber } from '@/application/ports/device-info-subscriber.js';
+import type { Db } from "@/infrastructure/db/postgres/index.js";
 import utils from "@transitive-sdk/utils";
 
 type BritInfoWorkMessage = {
@@ -36,8 +36,34 @@ type WorkTimestamp = string | Date | null | undefined;
 const workInfoCache: Record<string, BritInfoWorkCacheEntry> = {};
 const subscribedDevices = new Set<string>();
 
-const config = loadConfig();
-const db = createDb(config.databaseUrl);
+type WorkInfoDb = Pick<
+  Db,
+  | 'createWork'
+  | 'createInterruption'
+  | 'createWarning'
+  | 'getWorksForRobot'
+>;
+
+type TransitiveWorkInfoSubscriberConfig = {
+  jwtSecret: string;
+  transitiveUser: string;
+  db: WorkInfoDb;
+};
+
+export function createTransitiveWorkInfoSubscriber(
+  config: TransitiveWorkInfoSubscriberConfig
+): DeviceInfoSubscriber {
+  return {
+    subscribe(deviceId: string): Promise<void> {
+      return subscribeWorkInfo({
+        jwtSecret: config.jwtSecret,
+        transitiveUser: config.transitiveUser,
+        deviceId,
+        db: config.db,
+      });
+    },
+  };
+}
 
 function ensureDeviceCache(deviceId: string) {
   if (!workInfoCache[deviceId]) {
@@ -116,7 +142,11 @@ function normalizeWorkTimestamp(value: WorkTimestamp) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-async function saveInterruptions(workId: string, interruptions: BritInfoWorkMessage['interruptions_detail']) {
+async function saveInterruptions(
+  db: WorkInfoDb,
+  workId: string,
+  interruptions: BritInfoWorkMessage['interruptions_detail']
+) {
   const details = interruptions ?? [];
   
   for (let index = 0; index < details.length; index += 1) {
@@ -134,7 +164,11 @@ async function saveInterruptions(workId: string, interruptions: BritInfoWorkMess
   }
 }
 
-async function saveWarnings(workId: string, warnings: BritInfoWorkMessage['warnings_detail']) {
+async function saveWarnings(
+  db: WorkInfoDb,
+  workId: string,
+  warnings: BritInfoWorkMessage['warnings_detail']
+) {
   const details = warnings ?? [];
   
   for (let index = 0; index < details.length; index += 1) {
@@ -151,7 +185,7 @@ async function saveWarnings(workId: string, warnings: BritInfoWorkMessage['warni
   }
 }
 
-async function saveWork(deviceId: string, cache: BritInfoWorkCacheEntry) {
+async function saveWork(db: WorkInfoDb, deviceId: string, cache: BritInfoWorkCacheEntry) {
   if (!isCompleteWorkMessage(cache)) {
     return null;
   }
@@ -186,8 +220,8 @@ async function saveWork(deviceId: string, cache: BritInfoWorkCacheEntry) {
   });
 
   // Save interruptions and warnings only for newly created work
-  await saveInterruptions(workId, cache.interruptions_detail);
-  await saveWarnings(workId, cache.warnings_detail);
+  await saveInterruptions(db, workId, cache.interruptions_detail);
+  await saveWarnings(db, workId, cache.warnings_detail);
 
   console.log('Saved brit_info_work for device', deviceId, {
     workId,
@@ -202,6 +236,7 @@ export async function subscribeWorkInfo(opts: {
   jwtSecret: string;
   transitiveUser: string;
   deviceId: string;
+  db: WorkInfoDb;
 }) {
   if (subscribedDevices.has(opts.deviceId)) {
     return;
@@ -236,7 +271,7 @@ export async function subscribeWorkInfo(opts: {
 
       try {
         // saveWork handles deduplication by checking if work already exists
-        await saveWork(opts.deviceId, cache);
+        await saveWork(opts.db, opts.deviceId, cache);
       } catch (error) {
         console.error('Failed to process brit_info_work for device', opts.deviceId, error);
       }

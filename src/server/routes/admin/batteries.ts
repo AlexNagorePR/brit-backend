@@ -3,38 +3,33 @@ import utils from '@transitive-sdk/utils';
 import { requireAdmin } from '@/server/auth.js';
 import {
   ClientNotFoundError,
-  CreateBattery,
 } from '@/application/use-cases/batteries/create-battery.js';
-import { DeleteBattery } from '@/application/use-cases/batteries/delete-battery.js';
-import { GetBattery } from '@/application/use-cases/batteries/get-battery.js';
-import { ListBatteriesForClient } from '@/application/use-cases/batteries/list-batteries-for-client.js';
-import { ListBatteryUsers } from '@/application/use-cases/batteries/list-battery-users.js';
-import { SetBatteryUsers } from '@/application/use-cases/batteries/set-battery-users.js';
-import { UpdateBatterySerialNumber } from '@/application/use-cases/batteries/update-battery-serial-number.js';
+import type { CreateBattery } from '@/application/use-cases/batteries/create-battery.js';
+import type { DeleteBattery } from '@/application/use-cases/batteries/delete-battery.js';
+import type { GetBattery } from '@/application/use-cases/batteries/get-battery.js';
+import type { ListBatteriesForClient } from '@/application/use-cases/batteries/list-batteries-for-client.js';
+import type { ListBatteryUsers } from '@/application/use-cases/batteries/list-battery-users.js';
+import type { SetBatteryUsers } from '@/application/use-cases/batteries/set-battery-users.js';
+import type { UpdateBatterySerialNumber } from '@/application/use-cases/batteries/update-battery-serial-number.js';
 import {
   BatteryNotFoundError,
   BatteryValidationError,
 } from '@/application/use-cases/batteries/errors.js';
-import {
-  createDbBatteryRepository,
-} from '@/infrastructure/db/battery-repository.js';
-import { createDbClientRepository } from '@/infrastructure/db/client-repository.js';
 
 const log = utils.getLogger('routes/admin/batteries');
 
-export function createAdminBatteriesRouter(_config: any, db: any) {
+export type AdminBatteriesRouterDeps = {
+  createBattery: CreateBattery;
+  listBatteriesForClient: ListBatteriesForClient;
+  getBattery: GetBattery;
+  updateBatterySerialNumber: UpdateBatterySerialNumber;
+  deleteBattery: DeleteBattery;
+  setBatteryUsers: SetBatteryUsers;
+  listBatteryUsers: ListBatteryUsers;
+};
+
+export function createAdminBatteriesRouter(deps: AdminBatteriesRouterDeps) {
   const router = Router();
-  const batteryRepository = createDbBatteryRepository(db);
-  const createBattery = new CreateBattery({
-    batteryRepository,
-    clientRepository: createDbClientRepository(db),
-  });
-  const listBatteriesForClient = new ListBatteriesForClient(batteryRepository);
-  const getBattery = new GetBattery(batteryRepository);
-  const updateBatterySerialNumber = new UpdateBatterySerialNumber(batteryRepository);
-  const deleteBattery = new DeleteBattery(batteryRepository);
-  const setBatteryUsers = new SetBatteryUsers(batteryRepository);
-  const listBatteryUsers = new ListBatteryUsers(batteryRepository);
 
   // GET /admin/batteries - List batteries for a client
   /**
@@ -68,7 +63,7 @@ export function createAdminBatteriesRouter(_config: any, db: any) {
     const { clientId } = req.query;
 
     try {
-      const batteries = await listBatteriesForClient.execute({ clientId });
+      const batteries = await deps.listBatteriesForClient.execute({ clientId });
       return res.json(batteries);
     } catch (err) {
       if (err instanceof BatteryValidationError) {
@@ -123,7 +118,7 @@ export function createAdminBatteriesRouter(_config: any, db: any) {
     const { clientId, serialNumber, stateOfHealth } = req.body || {};
 
     try {
-      const battery = await createBattery.execute({
+      const battery = await deps.createBattery.execute({
         clientId,
         serialNumber,
         stateOfHealth,
@@ -178,7 +173,7 @@ export function createAdminBatteriesRouter(_config: any, db: any) {
     const batteryId = req.params.id;
 
     try {
-      const battery = await getBattery.execute(batteryId);
+      const battery = await deps.getBattery.execute(batteryId);
       return res.json(battery);
     } catch (err) {
       if (err instanceof BatteryNotFoundError) {
@@ -231,7 +226,7 @@ export function createAdminBatteriesRouter(_config: any, db: any) {
     const { serialNumber } = req.body || {};
 
     try {
-      const battery = await updateBatterySerialNumber.execute({
+      const battery = await deps.updateBatterySerialNumber.execute({
         id: batteryId,
         serialNumber,
       });
@@ -279,7 +274,7 @@ export function createAdminBatteriesRouter(_config: any, db: any) {
     const batteryId = req.params.id;
 
     try {
-      const battery = await deleteBattery.execute(batteryId);
+      const battery = await deps.deleteBattery.execute(batteryId);
       return res.json({
         ok: true,
         ...battery,
@@ -333,7 +328,7 @@ export function createAdminBatteriesRouter(_config: any, db: any) {
     const { userIds } = req.body || {};
 
     try {
-      const result = await setBatteryUsers.execute({
+      const result = await deps.setBatteryUsers.execute({
         id: batteryId,
         userIds,
       });
@@ -381,7 +376,7 @@ export function createAdminBatteriesRouter(_config: any, db: any) {
     const batteryId = req.params.id;
 
     try {
-      const users = await listBatteryUsers.execute(batteryId);
+      const users = await deps.listBatteryUsers.execute(batteryId);
       return res.json(users);
     } catch (err) {
       log.error('Get battery users failed', err);

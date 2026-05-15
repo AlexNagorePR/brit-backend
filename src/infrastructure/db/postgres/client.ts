@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { ClientInfo } from './types.js';
-import { Client } from '../../domain/models/client.js';
+import { Client } from '@/domain/models/client.js';
 
 function toClientInfo(client: Client): ClientInfo {
   return {

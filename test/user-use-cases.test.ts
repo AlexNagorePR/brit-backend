@@ -6,7 +6,7 @@ import { UserNotFoundError, UserValidationError } from '@/application/use-cases/
 import { FindUserById } from '@/application/use-cases/users/find-user-by-id.js';
 import { ListUsers } from '@/application/use-cases/users/list-users.js';
 import { ListUsersByClient } from '@/application/use-cases/users/list-users-by-client.js';
-import { SyncCognitoUsers } from '@/application/use-cases/users/sync-cognito-users.js';
+import { SyncIdentityUsers } from '@/application/use-cases/users/sync-identity-users.js';
 import { UpdateUserClient } from '@/application/use-cases/users/update-user-client.js';
 
 function createRepository(overrides = {}) {
@@ -18,7 +18,7 @@ function createRepository(overrides = {}) {
     findByEmail: vi.fn(),
     updateClient: vi.fn(),
     delete: vi.fn(),
-    syncCognitoUsers: vi.fn(),
+    syncIdentityUsers: vi.fn(),
     ...overrides,
   };
 }
@@ -160,17 +160,17 @@ describe('User use cases', () => {
     expect(repository.delete).toHaveBeenCalledWith('user-1');
   });
 
-  it('syncs Cognito users', async () => {
+  it('syncs identity users', async () => {
     const users = [{ username: 'user-1', email: 'one@example.com' }];
     const repository = createRepository({
-      syncCognitoUsers: vi.fn().mockResolvedValue(undefined),
+      syncIdentityUsers: vi.fn().mockResolvedValue(undefined),
     });
-    const useCase = new SyncCognitoUsers(repository as any);
+    const useCase = new SyncIdentityUsers(repository as any);
 
     await expect(useCase.execute(users)).resolves.toEqual({
       count: 1,
       users,
     });
-    expect(repository.syncCognitoUsers).toHaveBeenCalledWith(users);
+    expect(repository.syncIdentityUsers).toHaveBeenCalledWith(users);
   });
 });

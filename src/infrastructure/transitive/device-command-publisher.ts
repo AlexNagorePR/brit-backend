@@ -1,10 +1,34 @@
 import { signRosToolJWT } from '@/server/portal.js';
 import utils from '@transitive-sdk/utils';
+import type { DeviceCommandPublisher } from '@/application/ports/device-command-publisher.js';
 
 const rosToolConnections: Record<string, any> = {};
 const publishedDevices = new Set<string>();
 
 const log = utils.getLogger('device-command-publisher');
+
+type TransitiveDeviceCommandPublisherConfig = {
+  jwtSecret: string;
+  transitiveUser: string;
+};
+
+export function createTransitiveDeviceCommandPublisher(
+  config: TransitiveDeviceCommandPublisherConfig
+): DeviceCommandPublisher {
+  return {
+    initialize(deviceId: string): Promise<unknown> {
+      return initializeCommandPublisher({
+        jwtSecret: config.jwtSecret,
+        transitiveUser: config.transitiveUser,
+        deviceId,
+      });
+    },
+
+    publish(deviceId: string, topic: string, message: unknown): Promise<void> {
+      return publishCommand(deviceId, topic, message);
+    },
+  };
+}
 
 // Mapping of ROS topics to their message types
 const TOPIC_TYPE_MAP: Record<string, string> = {

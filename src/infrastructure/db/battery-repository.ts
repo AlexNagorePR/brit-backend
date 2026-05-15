@@ -1,6 +1,6 @@
 import { Battery } from '@/domain/models/battery.js';
 import type { BatteryRepository, BatteryUser } from '@/application/ports/battery-repository.js';
-import type { Db } from '@/server/db.js';
+import type { Db } from '@/infrastructure/db/postgres/index.js';
 
 type BatteryDb = Pick<
   Db,

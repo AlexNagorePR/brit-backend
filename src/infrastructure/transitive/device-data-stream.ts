@@ -1,5 +1,6 @@
 import { signRosToolJWT } from '@/server/portal.js';
 import utils from '@transitive-sdk/utils';
+import type { DeviceTelemetryStream } from '@/application/ports/device-telemetry-stream.js';
 import {
   BRIT_STATE_MAP,
   INK_LEVEL_MAP,
@@ -13,6 +14,29 @@ import {
 
 const telemetryCache: Record<string, any> = {};
 const subscribedDevices = new Set<string>();
+
+type TransitiveDeviceTelemetryConfig = {
+  jwtSecret: string;
+  transitiveUser: string;
+};
+
+export function createTransitiveDeviceTelemetryStream(
+  config: TransitiveDeviceTelemetryConfig
+): DeviceTelemetryStream {
+  return {
+    subscribe(deviceId: string): Promise<void> {
+      return subscribeTelemetry({
+        jwtSecret: config.jwtSecret,
+        transitiveUser: config.transitiveUser,
+        deviceId,
+      });
+    },
+
+    getData(deviceId: string): unknown {
+      return getTelemetryData(deviceId);
+    },
+  };
+}
 
 function ensureDeviceCache(deviceId: string) {
   if (!telemetryCache[deviceId]) {

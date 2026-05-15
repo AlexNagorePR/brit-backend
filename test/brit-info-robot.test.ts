@@ -16,10 +16,6 @@ const mockRosTool = vi.hoisted(() => ({
 
 const mockImportCapability = vi.hoisted(() => vi.fn().mockResolvedValue(mockRosTool));
 
-vi.mock('@/server/db.js', () => ({
-  createDb: () => mockDb,
-}));
-
 vi.mock('@/server/portal.js', () => ({
   signRosToolJWT: vi.fn(() => 'mock-jwt'),
 }));
@@ -50,12 +46,13 @@ describe('Brit Info Robot', () => {
   });
 
   it('subscribes to info_robot topics and stores robot summary fields', async () => {
-    const { subscribeRobotInfo } = await import('@/server/brit-info-robot.js');
+    const { subscribeRobotInfo } = await import('@/infrastructure/transitive/brit-info-robot.js');
 
     await subscribeRobotInfo({
       jwtSecret: 'secret',
       transitiveUser: 'user',
       deviceId: 'device-info-1',
+      db: mockDb as any,
     });
 
     expect(mockRosTool.subscribe).toHaveBeenCalledWith(2, '/info_robot/fecha_ultima_limpieza');
@@ -104,12 +101,13 @@ describe('Brit Info Robot', () => {
   });
 
   it('also reads flattened info_robot message paths', async () => {
-    const { subscribeRobotInfo } = await import('@/server/brit-info-robot.js');
+    const { subscribeRobotInfo } = await import('@/infrastructure/transitive/brit-info-robot.js');
 
     await subscribeRobotInfo({
       jwtSecret: 'secret',
       transitiveUser: 'user',
       deviceId: 'device-info-2',
+      db: mockDb as any,
     });
 
     mockRosTool.deviceData = {

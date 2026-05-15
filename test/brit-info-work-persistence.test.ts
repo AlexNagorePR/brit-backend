@@ -19,10 +19,6 @@ const mockRosTool = vi.hoisted(() => ({
 
 const mockImportCapability = vi.hoisted(() => vi.fn().mockResolvedValue(mockRosTool));
 
-vi.mock('@/server/db.js', () => ({
-  createDb: () => mockDb,
-}));
-
 vi.mock('@/server/portal.js', () => ({
   signRosToolJWT: vi.fn(() => 'mock-jwt'),
 }));
@@ -56,12 +52,13 @@ describe('Brit Info Work persistence', () => {
   it('stores interruptions and warnings once the work snapshot is complete', async () => {
     mockDb.getWorksForRobot.mockResolvedValue([]);
 
-    const { subscribeWorkInfo } = await import('@/server/brit-info-work.js');
+    const { subscribeWorkInfo } = await import('@/infrastructure/transitive/brit-info-work.js');
 
     await subscribeWorkInfo({
       jwtSecret: 'secret',
       transitiveUser: 'user',
       deviceId: 'device-1',
+      db: mockDb as any,
     });
 
     expect(mockRosTool.subscribe).toHaveBeenCalledWith(2, '/brit_info_work');
@@ -182,12 +179,13 @@ describe('Brit Info Work persistence', () => {
       },
     ]);
 
-    const { subscribeWorkInfo } = await import('@/server/brit-info-work.js');
+    const { subscribeWorkInfo } = await import('@/infrastructure/transitive/brit-info-work.js');
 
     await subscribeWorkInfo({
       jwtSecret: 'secret',
       transitiveUser: 'user',
       deviceId: 'device-2',
+      db: mockDb as any,
     });
 
     mockRosTool.deviceData = {
@@ -250,12 +248,13 @@ describe('Brit Info Work persistence', () => {
       },
     ]);
 
-    const { subscribeWorkInfo } = await import('@/server/brit-info-work.js');
+    const { subscribeWorkInfo } = await import('@/infrastructure/transitive/brit-info-work.js');
 
     await subscribeWorkInfo({
       jwtSecret: 'secret',
       transitiveUser: 'user',
       deviceId: 'device-3',
+      db: mockDb as any,
     });
 
     mockRosTool.deviceData = {

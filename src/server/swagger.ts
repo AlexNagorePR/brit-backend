@@ -1,4 +1,23 @@
 import swaggerJsdoc from 'swagger-jsdoc';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Determine API file patterns based on environment
+const isProduction = process.env.NODE_ENV === 'production';
+const apiFiles = isProduction
+  ? [
+      // In production, look for compiled .js files
+      path.join(__dirname, 'routes', '*.js'),
+      path.join(__dirname, 'routes', 'admin', '*.js'),
+    ]
+  : [
+      // In development, use TypeScript source files with glob pattern
+      './src/server/routes/*.ts',
+      './src/server/routes/admin/*.ts',
+    ];
 
 const options = {
   definition: {
@@ -17,7 +36,7 @@ const options = {
         description: 'Development server',
       },
       {
-        url: 'https://brit.phenomenonrobotics.com',
+        url: process.env.API_URL || 'https://brit.phenomenonrobotics.com',
         description: 'Production server',
       },
     ],
@@ -33,14 +52,7 @@ const options = {
     },
     security: [{ sessionCookie: [] }],
   },
-  apis: [
-    './src/server/routes/auth.ts',
-    './src/server/routes/api.ts',
-    './src/server/routes/admin/users.ts',
-    './src/server/routes/admin/clients.ts',
-    './src/server/routes/admin/robots.ts',
-    './src/server/routes/admin/batteries.ts',
-  ],
+  apis: apiFiles,
 };
 
 export const specs = swaggerJsdoc(options);

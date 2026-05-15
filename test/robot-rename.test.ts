@@ -12,7 +12,7 @@ const mockDb = vi.hoisted(() => ({
   syncRobotsSnapshot: vi.fn(),
 }));
 
-vi.mock('@/server/db.js', () => ({
+vi.mock('@/infrastructure/db/postgres/index.js', () => ({
   createDb: () => mockDb,
 }));
 

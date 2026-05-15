@@ -1,6 +1,6 @@
 import { User } from '@/domain/models/user.js';
 
-export type CognitoUserSyncItem = {
+export type IdentityUserSyncItem = {
   username: string;
   email: string;
 };
@@ -13,5 +13,5 @@ export interface UserRepository {
   findByEmail(email: string): Promise<User | null>;
   updateClient(userId: string, clientId?: string): Promise<void>;
   delete(userId: string): Promise<void>;
-  syncCognitoUsers(users: CognitoUserSyncItem[]): Promise<void>;
+  syncIdentityUsers(users: IdentityUserSyncItem[]): Promise<void>;
 }

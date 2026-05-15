@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { UserInfo } from './types.js';
-import { User } from '../../domain/models/user.js';
+import { User } from '@/domain/models/user.js';
 
 function toUserInfo(user: User): UserInfo {
   return {
@@ -127,7 +127,7 @@ export function createUserOps(pool: Pool) {
              RETURNING id, email`,
             [clientId, emails]
           );
-          console.log(`[syncUsersSnapshot] Deleted ${deleteResult.rowCount} users not in Cognito:`, deleteResult.rows);
+          console.log(`[syncUsersSnapshot] Deleted ${deleteResult.rowCount} users not in identity provider:`, deleteResult.rows);
         }
 
         const finalUsers = await client.query(
@@ -146,7 +146,7 @@ export function createUserOps(pool: Pool) {
       }
     },
 
-    async syncCognitoUsers(users: { username: string; email: string }[]) {
+    async syncIdentityUsers(users: { username: string; email: string }[]) {
       const client = await pool.connect();
 
       try {

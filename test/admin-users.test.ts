@@ -9,11 +9,11 @@ const mockDb = vi.hoisted(() => ({
   getUserByEmail: vi.fn(),
   getUserById: vi.fn(),
   getUsersByClient: vi.fn(),
-  syncCognitoUsers: vi.fn(),
+  syncIdentityUsers: vi.fn(),
   updateUserClient: vi.fn(),
 }));
 
-const mockCognitoAdmin = vi.hoisted(() => ({
+const mockIdentityProvider = vi.hoisted(() => ({
   addUserToGroups: vi.fn(),
   createUser: vi.fn(),
   deleteUser: vi.fn(),
@@ -24,12 +24,12 @@ const mockCognitoAdmin = vi.hoisted(() => ({
   removeUserFromGroups: vi.fn(),
 }));
 
-vi.mock('@/server/db.js', () => ({
+vi.mock('@/infrastructure/db/postgres/index.js', () => ({
   createDb: () => mockDb,
 }));
 
-vi.mock('@/server/cognito-admin.js', () => ({
-  createCognitoAdminService: () => mockCognitoAdmin,
+vi.mock('@/infrastructure/auth/cognito-user-identity-provider.js', () => ({
+  createCognitoUserIdentityProvider: () => mockIdentityProvider,
 }));
 
 vi.mock('@/server/auth.js', () => ({
@@ -46,7 +46,7 @@ vi.mock('@/server/auth.js', () => ({
   },
 }));
 
-vi.mock('@/server/collector.js', () => ({
+vi.mock('@/application/services/collector.js', () => ({
   createCollector: () => ({
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(),
@@ -61,8 +61,8 @@ describe('Admin users', () => {
     vi.clearAllMocks();
   });
 
-  it('GET /admin/users syncs Cognito users and returns database users', async () => {
-    const cognitoUsers = [
+  it('GET /admin/users syncs identity users and returns database users', async () => {
+    const identityUsers = [
       { username: 'user-1', attributes: { email: 'one@example.com' } },
       { username: 'user-2', attributes: {} },
     ];
@@ -70,8 +70,8 @@ describe('Admin users', () => {
       { id: 'user-1', email: 'one@example.com', clientId: null },
     ];
 
-    (mockCognitoAdmin.listUsers as any).mockResolvedValue(cognitoUsers);
-    (mockDb.syncCognitoUsers as any).mockResolvedValue(undefined);
+    (mockIdentityProvider.listUsers as any).mockResolvedValue(identityUsers);
+    (mockDb.syncIdentityUsers as any).mockResolvedValue(undefined);
     (mockDb.getAllUsers as any).mockResolvedValue(dbUsers);
 
     const app = createApp({
@@ -82,21 +82,21 @@ describe('Admin users', () => {
       .get('/admin/users')
       .expect(200);
 
-    expect(mockDb.syncCognitoUsers).toHaveBeenCalledWith([
+    expect(mockDb.syncIdentityUsers).toHaveBeenCalledWith([
       { username: 'user-1', email: 'one@example.com' },
     ]);
     expect(res.body).toEqual({
-      cognitoUsers,
+      identityUsers,
       dbUsers,
       synced: true,
     });
   });
 
-  it('POST /admin/users/sync manually syncs Cognito users', async () => {
-    (mockCognitoAdmin.listUsers as any).mockResolvedValue([
+  it('POST /admin/users/sync manually syncs identity users', async () => {
+    (mockIdentityProvider.listUsers as any).mockResolvedValue([
       { username: 'user-1', attributes: { email: 'one@example.com' } },
     ]);
-    (mockDb.syncCognitoUsers as any).mockResolvedValue(undefined);
+    (mockDb.syncIdentityUsers as any).mockResolvedValue(undefined);
 
     const app = createApp({
       oidcClient: { authorizationUrl: () => 'http://example/redirect' } as any,
@@ -113,13 +113,13 @@ describe('Admin users', () => {
     });
   });
 
-  it('POST /admin/users creates Cognito and database users', async () => {
-    const cognitoUser = {
+  it('POST /admin/users creates identity-provider and database users', async () => {
+    const identityUser = {
       username: 'user-1',
       attributes: { email: 'one@example.com' },
     };
 
-    (mockCognitoAdmin.createUser as any).mockResolvedValue(cognitoUser);
+    (mockIdentityProvider.createUser as any).mockResolvedValue(identityUser);
     (mockDb.createUser as any).mockResolvedValue('user-1');
 
     const app = createApp({
@@ -138,7 +138,7 @@ describe('Admin users', () => {
       })
       .expect(201);
 
-    expect(mockCognitoAdmin.createUser).toHaveBeenCalledWith({
+    expect(mockIdentityProvider.createUser).toHaveBeenCalledWith({
       email: '  ONE@EXAMPLE.COM  ',
       temporaryPassword: 'Temp123!',
       givenName: 'One',
@@ -150,7 +150,7 @@ describe('Admin users', () => {
       'one@example.com',
       'client-1'
     );
-    expect(res.body).toEqual(cognitoUser);
+    expect(res.body).toEqual(identityUser);
   });
 
   it('GET /admin/users/db-users returns database users', async () => {
@@ -218,8 +218,8 @@ describe('Admin users', () => {
     expect(mockDb.updateUserClient).not.toHaveBeenCalled();
   });
 
-  it('DELETE /admin/users/:username deletes Cognito and database users', async () => {
-    (mockCognitoAdmin.deleteUser as any).mockResolvedValue(undefined);
+  it('DELETE /admin/users/:username deletes identity-provider and database users', async () => {
+    (mockIdentityProvider.deleteUser as any).mockResolvedValue(undefined);
     (mockDb.deleteUser as any).mockResolvedValue(undefined);
 
     const app = createApp({
@@ -234,7 +234,7 @@ describe('Admin users', () => {
       ok: true,
       username: 'user-1',
     });
-    expect(mockCognitoAdmin.deleteUser).toHaveBeenCalledWith('user-1');
+    expect(mockIdentityProvider.deleteUser).toHaveBeenCalledWith('user-1');
     expect(mockDb.deleteUser).toHaveBeenCalledWith('user-1');
   });
 });

@@ -1,6 +1,6 @@
 import { signRosToolJWT } from '@/server/portal.js';
-import { createDb } from '@/server/db.js';
-import { loadConfig } from './config.js';
+import type { DeviceInfoSubscriber } from '@/application/ports/device-info-subscriber.js';
+import type { Db } from '@/infrastructure/db/postgres/index.js';
 import utils from '@transitive-sdk/utils';
 
 type RobotInfoField =
@@ -12,8 +12,28 @@ type RobotInfoField =
 
 const subscribedDevices = new Set<string>();
 
-const config = loadConfig();
-const db = createDb(config.databaseUrl);
+type RobotInfoDb = Pick<Db, 'updateRobotInfo'>;
+
+type TransitiveRobotInfoSubscriberConfig = {
+  jwtSecret: string;
+  transitiveUser: string;
+  db: RobotInfoDb;
+};
+
+export function createTransitiveRobotInfoSubscriber(
+  config: TransitiveRobotInfoSubscriberConfig
+): DeviceInfoSubscriber {
+  return {
+    subscribe(deviceId: string): Promise<void> {
+      return subscribeRobotInfo({
+        jwtSecret: config.jwtSecret,
+        transitiveUser: config.transitiveUser,
+        deviceId,
+        db: config.db,
+      });
+    },
+  };
+}
 
 const TOPICS: Array<{ field: RobotInfoField; topic: string }> = [
   { field: 'fecha_ultima_limpieza', topic: '/info_robot/fecha_ultima_limpieza' },
@@ -54,7 +74,7 @@ function getTopicValue(deviceData: any, field: RobotInfoField) {
   return messages.info_robot?.[field] ?? messages[`info_robot/${field}`] ?? messages[field];
 }
 
-async function saveRobotInfo(deviceId: string, field: RobotInfoField, value: any) {
+async function saveRobotInfo(db: RobotInfoDb, deviceId: string, field: RobotInfoField, value: any) {
   console.log('Saving robot info for device', deviceId, 'field:', field, 'value:', value);
   switch (field) {
     case 'fecha_ultima_limpieza': {
@@ -89,6 +109,7 @@ export async function subscribeRobotInfo(opts: {
   jwtSecret: string;
   transitiveUser: string;
   deviceId: string;
+  db: RobotInfoDb;
 }) {
   if (subscribedDevices.has(opts.deviceId)) {
     return;
@@ -117,7 +138,7 @@ export async function subscribeRobotInfo(opts: {
         if (value == null) return;
 
         try {
-          await saveRobotInfo(opts.deviceId, field, value);
+          await saveRobotInfo(opts.db, opts.deviceId, field, value);
         } catch (error) {
           console.error('Failed to process brit_info_robot for device', opts.deviceId, field, error);
         }

@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { RobotInfo, WorkInfo, InterruptionInfo, WarningInfo, CleanInfo } from './types.js';
-import { Robot } from '../../domain/models/robot.js';
+import { Robot } from '@/domain/models/robot.js';
 
 function toRobotInfo(robot: Robot, options: { includeUserEmails?: boolean } = {}): RobotInfo {
   const info: RobotInfo = {
