@@ -1,5 +1,4 @@
 // src/server/main.ts
-import portfinder from 'portfinder';
 import { Issuer } from 'openid-client';
 import utils from '@transitive-sdk/utils';
 
@@ -37,13 +36,17 @@ async function start() {
 
   const app = createApp({ oidcClient });
 
-  const port = await portfinder.getPortPromise({
-    port: config.port,
-    stopPort: config.port + 1000,
+  const server = app.listen(config.port, () => {
+    console.log(`Server is listening on port ${config.port}`);
   });
 
-  app.listen(port, () => {
-    console.log(`Server is listening on port ${port}`);
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      log.error(`Port ${config.port} is already in use. Stop the process using it or set PORT to match the frontend proxy.`);
+      process.exit(1);
+    }
+
+    throw err;
   });
 }
 

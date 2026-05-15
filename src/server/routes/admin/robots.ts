@@ -1,43 +1,61 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
+import { ClientNotFoundError } from '@/application/use-cases/clients/errors.js';
+import { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
+import { RobotNotFoundError, RobotValidationError } from '@/application/use-cases/robots/errors.js';
+import { GetRobot } from '@/application/use-cases/robots/get-robot.js';
+import { ListRobots } from '@/application/use-cases/robots/list-robots.js';
+import { ListRobotUsers } from '@/application/use-cases/robots/list-robot-users.js';
+import { SetRobotUsers } from '@/application/use-cases/robots/set-robot-users.js';
+import { SyncRobotsFromPortal } from '@/application/use-cases/robots/sync-robots-from-portal.js';
+import { UpdateRobotClient } from '@/application/use-cases/robots/update-robot-client.js';
+import { createDbClientRepository } from '@/infrastructure/db/client-repository.js';
+import { createDbRobotRepository } from '@/infrastructure/db/robot-repository.js';
+import { createPortalApi } from '@/infrastructure/portal/portal-api.js';
 import { requireAdmin } from '@/server/auth.js';
-import { signPortalApiJWT, fetchPortalApi } from '@/server/portal.js';
-import { RobotInfo } from '@/server/db.js';
 
 const log = utils.getLogger('routes/admin/robots');
 
 export function createAdminRobotsRouter(config: any, db: any) {
   const router = Router();
+  const findClientByName = new FindClientByName(createDbClientRepository(db));
+  const robotRepository = createDbRobotRepository(db);
+  const getRobot = new GetRobot(robotRepository);
+  const listRobots = new ListRobots(robotRepository);
+  const listRobotUsers = new ListRobotUsers(robotRepository);
+  const setRobotUsers = new SetRobotUsers(robotRepository);
+  const syncRobotsFromPortal = new SyncRobotsFromPortal(
+    createPortalApi(config),
+    robotRepository
+  );
+  const updateRobotClient = new UpdateRobotClient(robotRepository);
 
   router.post('/sync', requireAdmin, async (_req, res) => {
+    /**
+     * @swagger
+     * /admin/robots/sync:
+     *   post:
+     *     summary: Sync robots from Portal API
+     *     description: Synchronizes all robots from Portal API with the database
+     *     tags:
+     *       - Admin - Robots
+     *     security:
+     *       - sessionCookie: []
+     *     responses:
+     *       200:
+     *         description: Robots synced successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       502:
+     *         description: Portal API request failed
+     */
     try {
-      const token = signPortalApiJWT({
-        jwtSecret: config.jwtSecret,
-        transitiveUser: config.transitiveUser,
-        validitySeconds: 60,
-      });
-
-      const url = `https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/info/`;
-      const data = await fetchPortalApi<any>(token, url, { timeoutMs: 14000 });
-
-      const robots: RobotInfo[] = Object.entries(data || {})
-        .filter(([, value]: [string, any]) => value!.os?.hostname)
-        .map(([id, value]: [string, any]) => ({
-          id,
-          clientId: value?.clientId,
-          hostName: value.os.hostname,
-          robotName: value.os.hostname,
-        }));
-
-      console.log('Syncing robots from portal', robots);
-
-      // Preserve existing client assignment in DB; do not force a default client.
-      await db.syncRobotsSnapshot(null, robots);
+      const result = await syncRobotsFromPortal.execute();
 
       return res.json({
         ok: true,
-        count: robots.length,
-        robots,
+        count: result.count,
+        robots: result.robots,
       });
     } catch (err) {
       log.error('Robot sync failed', err);
@@ -46,9 +64,26 @@ export function createAdminRobotsRouter(config: any, db: any) {
   });
 
   router.get('/', requireAdmin, async (_req, res) => {
+    /**
+     * @swagger
+     * /admin/robots:
+     *   get:
+     *     summary: List all robots
+     *     description: Returns a list of all robots
+     *     tags:
+     *       - Admin - Robots
+     *     security:
+     *       - sessionCookie: []
+     *     responses:
+     *       200:
+     *         description: Robots retrieved successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       500:
+     *         description: List failed
+     */
     try {
-      const robots = await db.getAllRobots();
-      console.log('Fetched all robots for admin', robots);
+      const robots = await listRobots.execute();
       return res.json(robots);
     } catch (err) {
       log.error('List robots failed', err);
@@ -57,27 +92,76 @@ export function createAdminRobotsRouter(config: any, db: any) {
   });
 
   router.get('/:robotId', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/robots/{robotId}:
+     *   get:
+     *     summary: Get robot by ID
+     *     description: Retrieves information about a specific robot
+     *     tags:
+     *       - Admin - Robots
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: robotId
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: Robot retrieved successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       404:
+     *         description: Robot not found
+     *       500:
+     *         description: Get failed
+     */
     const robotId = req.params.robotId;
 
     try {
-      const robot = await db.getRobotById(robotId);
-
-      if (!robot) {
-        return res.status(404).json({ error: 'Robot not found' });
-      }
-
+      const robot = await getRobot.execute(robotId);
       return res.json(robot);
     } catch (err) {
+      if (err instanceof RobotNotFoundError) {
+        return res.status(404).json({ error: err.message });
+      }
+
       log.error('Get robot failed', { robotId, error: err });
       return res.status(500).json({ error: 'Get robot failed' });
     }
   });
 
   router.get('/:robotId/users', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/robots/{robotId}/users:
+     *   get:
+     *     summary: Get users for a robot
+     *     description: Returns all users assigned to a specific robot
+     *     tags:
+     *       - Admin - Robots
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: robotId
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: Robot users retrieved successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       500:
+     *         description: Get failed
+     */
     const robotId = req.params.robotId;
 
     try {
-      const userIds = await db.getUsersForRobot(robotId);
+      const userIds = await listRobotUsers.execute(robotId);
 
       return res.json({
         robotId,
@@ -90,35 +174,103 @@ export function createAdminRobotsRouter(config: any, db: any) {
   });
 
   router.put('/:robotId/users', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/robots/{robotId}/users:
+     *   put:
+     *     summary: Set users for a robot
+     *     description: Updates the users assigned to a robot (replaces all current users)
+     *     tags:
+     *       - Admin - Robots
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: robotId
+     *         required: true
+     *         schema:
+     *           type: string
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             properties:
+     *               userIds:
+     *                 type: array
+     *                 items:
+     *                   type: string
+     *     responses:
+     *       200:
+     *         description: Users updated successfully
+     *       400:
+     *         description: Validation error
+     *       401:
+     *         description: User not authenticated or not admin
+     *       500:
+     *         description: Update failed
+     */
     const robotId = req.params.robotId;
     const { userIds } = req.body || {};
 
-    if (!Array.isArray(userIds)) {
-      return res.status(400).json({ error: 'userIds must be an array' });
-    }
-
-    const normalizedUserIds = [...new Set(
-      userIds.filter((u: unknown): u is string => typeof u === 'string' && u.trim().length > 0)
-        .map(u => u.trim().toLowerCase())
-    )];
-
-    console.log(`Setting users for robot ${robotId}:`, normalizedUserIds);
-
     try {
-      await db.setUsersForRobot(robotId, normalizedUserIds);
+      const result = await setRobotUsers.execute({ robotId, userIds });
 
       return res.json({
         ok: true,
-        robotId,
-        userIds: normalizedUserIds,
+        ...result,
       });
     } catch (err: any) {
+      if (err instanceof RobotValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+
       log.error('Set robot users failed', err);
       return res.status(500).json({ error: 'Set robot users failed' });
     }
   });
 
   router.patch('/:robotId/client', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/robots/{robotId}/client:
+     *   patch:
+     *     summary: Assign or remove client for robot
+     *     description: Associates a robot with a client by client name or removes the association
+     *     tags:
+     *       - Admin - Robots
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: robotId
+     *         required: true
+     *         schema:
+     *           type: string
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             properties:
+     *               clientName:
+     *                 type: string
+     *                 nullable: true
+     *                 description: The client name or null to remove assignment
+     *     responses:
+     *       200:
+     *         description: Robot client assignment updated successfully
+     *       400:
+     *         description: clientName must be string or null
+     *       401:
+     *         description: User not authenticated or not admin
+     *       404:
+     *         description: Client not found
+     *       500:
+     *         description: Update failed
+     */
     const robotId = req.params.robotId;
     const { clientName } = req.body || {};
 
@@ -128,31 +280,35 @@ export function createAdminRobotsRouter(config: any, db: any) {
 
     try {
       if (!clientName) {
-        await db.updateRobotClient(robotId, null);
+        const result = await updateRobotClient.execute({
+          robotId,
+          clientId: null,
+        });
 
         return res.json({
           ok: true,
-          robotId,
-          clientId: null,
+          ...result,
           clientName: null,
         });
       }
 
-      const client = await db.getClientByName(clientName);
+      const client = await findClientByName.execute(clientName);
 
-      if (!client) {
-        return res.status(404).json({ error: 'Client not found' });
-      }
-
-      await db.updateRobotClient(robotId, client.id);
+      const result = await updateRobotClient.execute({
+        robotId,
+        clientId: client.id,
+      });
 
       return res.json({
         ok: true,
-        robotId,
-        clientId: client.id,
+        ...result,
         clientName: client.name,
       });
     } catch (err) {
+      if (err instanceof ClientNotFoundError) {
+        return res.status(404).json({ error: err.message });
+      }
+
       log.error('Update robot client failed', { robotId, clientName, error: err });
       return res.status(500).json({ error: 'Update robot client failed' });
     }

@@ -15,6 +15,20 @@ export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
   const router = Router();
 
   // OIDC login
+  /**
+   * @swagger
+   * /auth/login:
+   *   get:
+   *     summary: Start OIDC authentication flow
+   *     description: Initiates the OpenID Connect login flow with Cognito
+   *     tags:
+   *       - Authentication
+   *     responses:
+   *       302:
+   *         description: Redirects to Cognito authentication server
+   *       500:
+   *         description: OIDC client not initialized
+   */
   router.get('/login', (req: any, res) => {
     if (!oidcClient) return res.status(500).send('OIDC client not initialized');
 
@@ -35,6 +49,40 @@ export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
   });
 
   // OIDC callback
+  /**
+   * @swagger
+   * /auth/callback:
+   *   get:
+   *     summary: OIDC authentication callback
+   *     description: Callback endpoint for OIDC authentication. Validates the token and establishes the session
+   *     tags:
+   *       - Authentication
+   *     parameters:
+   *       - in: query
+   *         name: code
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: Authorization code from Cognito
+   *       - in: query
+   *         name: state
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: State parameter for CSRF validation
+   *       - in: query
+   *         name: error
+   *         schema:
+   *           type: string
+   *         description: Error code if authentication failed
+   *     responses:
+   *       302:
+   *         description: Redirects to postLoginRedirectUrl on success
+   *       400:
+   *         description: Invalid state, expired login, or OIDC error
+   *       500:
+   *         description: OIDC client not initialized or callback error
+   */
   router.get('/callback', async (req: any, res) => {
     try {
       if (!oidcClient) return res.status(500).send('OIDC client not initialized');
@@ -100,6 +148,18 @@ export function createAuthRouter(config: any, oidcClient?: OidcClientLike) {
   });
 
   // Logout
+  /**
+   * @swagger
+   * /auth/logout:
+   *   get:
+   *     summary: Logout the current user
+   *     description: Destroys the user session and redirects to Cognito logout
+   *     tags:
+   *       - Authentication
+   *     responses:
+   *       302:
+   *         description: Redirects to Cognito logout endpoint
+   */
   router.get('/logout', (req: any, res) => {
     req.session.destroy(() => {
       res.clearCookie('connect.sid');

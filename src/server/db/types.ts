@@ -6,12 +6,12 @@ export type ClientInfo = {
 export type UserInfo = {
   id: string;
   email: string;
-  clientId: string;
+  clientId: string | null;
 };
 
 export type RobotInfo = {
   id: string;
-  clientId: string;
+  clientId?: string | null;
   hostName: string;
   robotName: string;
   userEmails?: string[];
@@ -27,8 +27,8 @@ export type RobotInfo = {
 export type BatteryInfo = {
   id: string;
   clientId: string;
-  stateOfHealth?: number;
-  serialNumber?: string;
+  stateOfHealth?: number | null;
+  serialNumber: string;
 };
 
 export type WorkInfo = {

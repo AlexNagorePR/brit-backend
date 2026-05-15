@@ -1,14 +1,24 @@
 import { Pool } from 'pg';
 import { ClientInfo } from './types.js';
+import { Client } from '../../domain/models/client.js';
+
+function toClientInfo(client: Client): ClientInfo {
+  return {
+    id: client.getId(),
+    name: client.getName(),
+  };
+}
 
 export function createClientOps(pool: Pool) {
   return {
     async createClient(name: string) {
+      const client = Client.create(name);
+
       const { rows } = await pool.query(
         `INSERT INTO client (name)
          VALUES ($1)
          RETURNING id`,
-        [name]
+        [client.getName()]
       );
       return rows[0].id;
     },
@@ -20,7 +30,9 @@ export function createClientOps(pool: Pool) {
          WHERE id = $1`,
         [id]
       );
-      return rows[0] || null;
+      if (!rows[0]) return null;
+
+      return toClientInfo(Client.reconstruct(rows[0].id, rows[0].name));
     },
 
     async getAllClients() {
@@ -29,7 +41,7 @@ export function createClientOps(pool: Pool) {
          FROM client
          ORDER BY created_at ASC`
       );
-      return rows;
+      return rows.map(r => toClientInfo(Client.reconstruct(r.id, r.name)));
     },
 
     async deleteClient(id: string) {
@@ -40,14 +52,18 @@ export function createClientOps(pool: Pool) {
     },
 
     async getClientByName(name: string) {
+      const client = Client.create(name);
+
       const { rows } = await pool.query(
         `SELECT id, name
         FROM client
         WHERE name = $1`,
-        [name]
+        [client.getName()]
       );
 
-      return rows[0] || null;
+      if (!rows[0]) return null;
+
+      return toClientInfo(Client.reconstruct(rows[0].id, rows[0].name));
     },
   };
 }

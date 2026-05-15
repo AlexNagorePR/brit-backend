@@ -1,14 +1,35 @@
 import { Pool } from 'pg';
 import { BatteryInfo } from './types.js';
+import { Battery } from '../../domain/models/battery.js';
+
+function toBatteryInfo(battery: Battery): BatteryInfo {
+  return {
+    id: battery.getId(),
+    clientId: battery.getClientId(),
+    stateOfHealth: battery.getStateOfHealth() ?? null,
+    serialNumber: battery.getSerialNumber(),
+  };
+}
+
+function reconstructBattery(row: any): Battery {
+  return Battery.reconstruct(
+    row.id,
+    row.client_id,
+    row.serial_number,
+    row.state_of_health
+  );
+}
 
 export function createBatteryOps(pool: Pool) {
   return {
-    async createBattery(clientId: string, serialNumber?: string, stateOfHealth?: number) {
+    async createBattery(clientId: string, serialNumber: string, stateOfHealth?: number) {
+      const battery = Battery.create(clientId, serialNumber, stateOfHealth);
+
       const { rows } = await pool.query(
         `INSERT INTO battery (client_id, serial_number, state_of_health)
          VALUES ($1, $2, $3)
          RETURNING id`,
-        [clientId, serialNumber || null, stateOfHealth || null]
+        [battery.getClientId(), battery.getSerialNumber(), battery.getStateOfHealth() ?? null]
       );
       return rows[0].id;
     },
@@ -21,12 +42,7 @@ export function createBatteryOps(pool: Pool) {
          ORDER BY created_at ASC`,
         [clientId]
       );
-      return rows.map(r => ({
-        id: r.id,
-        clientId: r.client_id,
-        stateOfHealth: r.state_of_health,
-        serialNumber: r.serial_number,
-      }));
+      return rows.map(r => toBatteryInfo(reconstructBattery(r)));
     },
 
     async getBattery(id: string) {
@@ -37,12 +53,8 @@ export function createBatteryOps(pool: Pool) {
         [id]
       );
       if (!rows[0]) return null;
-      return {
-        id: rows[0].id,
-        clientId: rows[0].client_id,
-        stateOfHealth: rows[0].state_of_health,
-        serialNumber: rows[0].serial_number,
-      };
+
+      return toBatteryInfo(reconstructBattery(rows[0]));
     },
 
     async updateBattery(id: string, updates: Partial<BatteryInfo>) {
@@ -51,12 +63,14 @@ export function createBatteryOps(pool: Pool) {
       let paramCount = 1;
 
       if (updates.stateOfHealth !== undefined) {
+        const battery = Battery.create('client-placeholder', 'serial-placeholder', updates.stateOfHealth);
         fields.push(`state_of_health = $${paramCount++}`);
-        values.push(updates.stateOfHealth);
+        values.push(battery.getStateOfHealth() ?? null);
       }
       if (updates.serialNumber !== undefined) {
+        const battery = Battery.create('client-placeholder', updates.serialNumber);
         fields.push(`serial_number = $${paramCount++}`);
-        values.push(updates.serialNumber);
+        values.push(battery.getSerialNumber());
       }
 
       if (fields.length === 0) return;
@@ -72,15 +86,6 @@ export function createBatteryOps(pool: Pool) {
       await pool.query(
         `DELETE FROM battery WHERE id = $1`,
         [id]
-      );
-    },
-
-    async addUserToBattery(userId: string, batteryId: string) {
-      await pool.query(
-        `INSERT INTO user_battery (user_id, battery_id)
-         VALUES ($1, $2)
-         ON CONFLICT (user_id, battery_id) DO NOTHING`,
-        [userId, batteryId]
       );
     },
 
@@ -132,12 +137,7 @@ export function createBatteryOps(pool: Pool) {
          ORDER BY b.created_at ASC`,
         [userId]
       );
-      return rows.map(r => ({
-        id: r.id,
-        clientId: r.client_id,
-        stateOfHealth: r.state_of_health,
-        serialNumber: r.serial_number,
-      }));
+      return rows.map(r => toBatteryInfo(reconstructBattery(r)));
     },
 
     async getUsersForBattery(batteryId: string) {

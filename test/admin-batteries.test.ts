@@ -52,13 +52,13 @@ describe('Admin batteries', () => {
         id: 'b1',
         clientId: 'c1',
         serialNumber: 'SN-001',
-        stateOfHealth: 95,
+        stateOfHealth: null,
       },
       {
         id: 'b2',
         clientId: 'c1',
         serialNumber: 'SN-002',
-        stateOfHealth: 88,
+        stateOfHealth: null,
       },
     ];
 
@@ -89,7 +89,7 @@ describe('Admin batteries', () => {
       id: 'b1',
       clientId: 'c1',
       serialNumber: 'SN-001',
-      stateOfHealth: 95,
+      stateOfHealth: null,
     };
 
     (mockDb.getBattery as any).mockResolvedValue(battery);
@@ -130,7 +130,6 @@ describe('Admin batteries', () => {
       .send({
         clientId: 'c1',
         serialNumber: 'SN-001',
-        stateOfHealth: 95,
       })
       .expect(201);
 
@@ -139,11 +138,11 @@ describe('Admin batteries', () => {
       id: newBatteryId,
       clientId: 'c1',
       serialNumber: 'SN-001',
-      stateOfHealth: 95,
+      stateOfHealth: null,
     });
 
     expect(mockDb.getClient).toHaveBeenCalledWith('c1');
-    expect(mockDb.createBattery).toHaveBeenCalledWith('c1', 'SN-001', 95);
+    expect(mockDb.createBattery).toHaveBeenCalledWith('c1', 'SN-001', undefined);
   });
 
   it('POST /admin/batteries returns 400 if clientId is missing', async () => {
@@ -157,6 +156,21 @@ describe('Admin batteries', () => {
       .expect(400);
 
     expect(res.body.error).toBe('clientId is required and must be a string');
+  });
+
+  it('POST /admin/batteries returns 400 if serialNumber is missing', async () => {
+    const app = createApp({ oidcClient: { authorizationUrl: () => 'http://example/redirect' } as any });
+
+    const res = await request(app)
+      .post('/admin/batteries')
+      .send({
+        clientId: 'c1',
+      })
+      .expect(400);
+
+    expect(res.body.error).toBe('serialNumber is required and must be a non-empty string');
+    expect(mockDb.getClient).not.toHaveBeenCalled();
+    expect(mockDb.createBattery).not.toHaveBeenCalled();
   });
 
   it('POST /admin/batteries returns 404 if client not found', async () => {
@@ -184,7 +198,6 @@ describe('Admin batteries', () => {
       .put('/admin/batteries/b1')
       .send({
         serialNumber: 'SN-001-UPDATED',
-        stateOfHealth: 92,
       })
       .expect(200);
 
@@ -192,16 +205,14 @@ describe('Admin batteries', () => {
       ok: true,
       id: 'b1',
       serialNumber: 'SN-001-UPDATED',
-      stateOfHealth: 92,
     });
 
     expect(mockDb.updateBattery).toHaveBeenCalledWith('b1', {
       serialNumber: 'SN-001-UPDATED',
-      stateOfHealth: 92,
     });
   });
 
-  it('PUT /admin/batteries/:id returns 400 if no fields are provided', async () => {
+  it('PUT /admin/batteries/:id returns 400 if serialNumber is missing', async () => {
     const app = createApp({ oidcClient: { authorizationUrl: () => 'http://example/redirect' } as any });
 
     const res = await request(app)
@@ -209,7 +220,7 @@ describe('Admin batteries', () => {
       .send({})
       .expect(400);
 
-    expect(res.body.error).toBe('At least one field (serialNumber, stateOfHealth) must be provided');
+    expect(res.body.error).toBe('serialNumber is required and must be a non-empty string');
   });
 
   it('DELETE /admin/batteries/:id deletes a battery', async () => {

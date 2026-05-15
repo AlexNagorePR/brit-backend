@@ -1,31 +1,58 @@
 import { Pool } from 'pg';
 import { RobotInfo, WorkInfo, InterruptionInfo, WarningInfo, CleanInfo } from './types.js';
+import { Robot } from '../../domain/models/robot.js';
+
+function toRobotInfo(robot: Robot, options: { includeUserEmails?: boolean } = {}): RobotInfo {
+  const info: RobotInfo = {
+    id: robot.getId(),
+    clientId: robot.getClientId() ?? null,
+    hostName: robot.getHostName(),
+    robotName: robot.getRobotName(),
+  };
+
+  if (options.includeUserEmails) {
+    info.userEmails = robot.getUserEmails();
+  }
+
+  return info;
+}
+
+function reconstructRobot(row: any, userEmails: string[] = []): Robot {
+  return Robot.reconstruct(
+    row.id,
+    row.host_name,
+    row.robot_name,
+    row.client_id ?? undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    userEmails
+  );
+}
+
+function reconstructRobotUsers(robotId: string, userEmails: string[]): Robot {
+  return Robot.reconstruct(
+    robotId,
+    '',
+    '',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    userEmails
+  );
+}
 
 export function createRobotOps(pool: Pool) {
   return {
-    async getRobotsForClient(clientId: string) {
-      const { rows } = await pool.query(
-        `SELECT id, client_id, host_name, robot_name, delivery_date, last_mant, last_clean, last_work, works, time_on, time_work
-         FROM robot
-         WHERE client_id = $1
-         ORDER BY created_at ASC`,
-        [clientId]
-      );
-      return rows.map(r => ({
-        id: r.id,
-        clientId: r.client_id,
-        hostName: r.host_name,
-        robotName: r.robot_name,
-        deliveryDate: r.delivery_date,
-        lastMaint: r.last_mant,
-        lastClean: r.last_clean,
-        lastWork: r.last_work,
-        works: r.works,
-        timeOn: r.time_on,
-        timeWork: r.time_work,
-      }));
-    },
-
     async getRobotIdsForUser(email: string) {
       const { rows } = await pool.query(
         `SELECT r.id, r.host_name, r.robot_name, r.client_id
@@ -36,12 +63,7 @@ export function createRobotOps(pool: Pool) {
         [email]
       );
 
-      return rows.map(r => ({
-        id: r.id,
-        clientId: r.client_id,
-        hostName: r.host_name,
-        robotName: r.robot_name,
-      }));
+      return rows.map(r => toRobotInfo(reconstructRobot(r)));
     },
 
     async getAllRobots() {
@@ -57,12 +79,11 @@ export function createRobotOps(pool: Pool) {
       );
 
       return rows.map(r => ({
-        id: r.id,
-        clientId: r.client_id,
+        ...toRobotInfo(
+          reconstructRobot(r, r.user_emails),
+          { includeUserEmails: true }
+        ),
         clientName: r.client_name,
-        hostName: r.host_name,
-        robotName: r.robot_name,
-        userEmails: r.user_emails,
       }));
     },
 
@@ -170,26 +191,14 @@ export function createRobotOps(pool: Pool) {
         event: c.event,
       }));
 
+      const robot = reconstructRobot(r, r.user_emails);
+
       return {
-        id: r.id,
-        clientId: r.client_id,
+        ...toRobotInfo(robot, { includeUserEmails: true }),
         clientName: r.client_name,
-        hostName: r.host_name,
-        robotName: r.robot_name,
-        userEmails: r.user_emails,
         works: worksWithDetails,
         cleans,
       };
-    },
-
-    async upsertRobot(clientId: string, hostName: string, robotName: string) {
-      await pool.query(
-        `INSERT INTO robot (client_id, host_name, robot_name)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (host_name)
-         DO UPDATE SET robot_name = EXCLUDED.robot_name`,
-        [clientId, hostName, robotName]
-      );
     },
 
     async updateRobotClient(robotId: string, clientId: string | null) {
@@ -202,15 +211,17 @@ export function createRobotOps(pool: Pool) {
     },
 
     async updateRobotName(id: string, name: string) {
+      const robot = Robot.create(id, 'host-placeholder', name);
+
       await pool.query(
         `UPDATE robot
          SET robot_name = $2
          WHERE id = $1`,
-        [id, name]
+        [robot.getId(), robot.getRobotName()]
       );
     },
 
-    async updateRobotInfo(id: string, updates: Pick<Partial<RobotInfo>, 'lastClean' | 'lastWork' | 'works' | 'timeOn' | 'timeWork'>) {
+    async updateRobotInfo(id: string, updates: Partial<RobotInfo>) {
       const fields: string[] = [];
       const values: any[] = [];
       let paramCount = 1;
@@ -245,47 +256,51 @@ export function createRobotOps(pool: Pool) {
       );
     },
 
-    async deleteRobot(id: string) {
-      await pool.query(
-        `DELETE FROM robot
-         WHERE id = $1`,
-        [id]
-      );
-    },
-
-    async syncRobotsSnapshot(clientId: string | null, robots: RobotInfo[]) {
+    async syncRobotsSnapshot(robots: RobotInfo[]) {
       const client = await pool.connect();
 
       try {
         await client.query('BEGIN');
 
-        for (const robot of robots) {
-          await client.query(
-            `INSERT INTO robot (id, client_id, host_name, robot_name)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (host_name)
-             DO UPDATE SET robot_name = EXCLUDED.robot_name`,
-            [robot.id, robot.clientId ?? clientId, robot.hostName, robot.robotName]
+        const domainRobots = robots.map(robot => Robot.create(
+          robot.id,
+          robot.hostName,
+          robot.robotName,
+          robot.clientId ?? undefined,
+          robot.userEmails ?? []
+        ));
+
+        console.log(`Starting sync with ${domainRobots.length} robots:`, domainRobots.map(r => ({ id: r.getId(), hostName: r.getHostName() })));
+
+        for (const robot of domainRobots) {
+          console.log(`Upserting robot ${robot.getHostName()} with id ${robot.getId()}`);
+          const result = await client.query(
+            `INSERT INTO robot (id, host_name, robot_name)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (id)
+             DO NOTHING
+             RETURNING id`,
+            [robot.getId(), robot.getHostName(), robot.getRobotName()]
           );
+          if (result.rows.length === 0) {
+            console.log(`  → Conflict detected, robot ${robot.getId()} already exists (DO NOTHING)`);
+          } else {
+            console.log(`  → Robot ${robot.getId()} inserted successfully`);
+          }
         }
 
-        const hostNames = robots.map(r => r.hostName);
-        
-        if (!clientId) {
-          await client.query('COMMIT');
-          return;
-        }
-
-        if (hostNames.length === 0) {
-          await client.query(`DELETE FROM robot WHERE client_id = $1`, [clientId]);
+        const hostnames = domainRobots.map(r => r.getHostName());
+        console.log(`Deleting robots NOT in: [${hostnames.join(', ')}]`);
+        const deleteResult = await client.query(
+          `DELETE FROM robot
+          WHERE host_name NOT IN (SELECT UNNEST($1::text[]))
+          RETURNING id, host_name, robot_name`,
+          [hostnames]
+        );
+        if (deleteResult.rows.length > 0) {
+          console.log(`  → Deleted ${deleteResult.rows.length} robots:`, deleteResult.rows);
         } else {
-          await client.query(
-            `DELETE FROM robot
-             WHERE client_id = $1 AND host_name NOT IN (
-               SELECT UNNEST($2::text[])
-             )`,
-            [clientId, hostNames]
-          );
+          console.log(`  → No robots deleted`);
         }
 
         await client.query('COMMIT');
@@ -295,23 +310,6 @@ export function createRobotOps(pool: Pool) {
       } finally {
         client.release();
       }
-    },
-
-    async addUserToRobot(robotId: string, userId: string) {
-      await pool.query(
-        `INSERT INTO user_robot (user_id, robot_id)
-        VALUES ($1, $2)
-        ON CONFLICT (user_id, robot_id) DO NOTHING`,
-        [userId, robotId]
-      );
-    },
-
-    async removeUserFromRobot(robotId: string, userId: string) {
-      await pool.query(
-        `DELETE FROM user_robot
-        WHERE user_id = $1 AND robot_id = $2`,
-        [userId, robotId]
-      );
     },
 
     async getUsersForRobot(robotId: string) {
@@ -324,10 +322,13 @@ export function createRobotOps(pool: Pool) {
         [robotId]
       );
 
-      return rows.map(r => r.email);
+      const robot = reconstructRobotUsers(robotId, rows.map(r => r.email));
+      return robot.getUserEmails();
     },
 
     async setUsersForRobot(robotId: string, userEmails: string[]) {
+      const robot = reconstructRobotUsers(robotId, userEmails);
+      const normalizedUserEmails = robot.getUserEmails();
       const client = await pool.connect();
 
       try {
@@ -339,7 +340,7 @@ export function createRobotOps(pool: Pool) {
           [robotId]
         );
 
-        for (const email of userEmails) {
+        for (const email of normalizedUserEmails) {
           await client.query(
             `INSERT INTO user_robot (user_id, robot_id)
             SELECT id, $2

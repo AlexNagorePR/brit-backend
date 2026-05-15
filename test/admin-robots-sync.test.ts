@@ -8,7 +8,6 @@ const mockDb = vi.hoisted(() => ({
   createUser: vi.fn(),
   deleteUser: vi.fn(),
   getAllRobots: vi.fn(),
-  upsertRobot: vi.fn(),
   updateRobotName: vi.fn(),
   deleteRobot: vi.fn(),
   syncRobotsSnapshot: vi.fn(),
@@ -80,23 +79,20 @@ describe('Admin robots sync', () => {
     expect(fetchPortalApi).toHaveBeenCalledTimes(1);
 
     expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledTimes(1);
-    expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledWith(
-      null,
-      [
-        {
-          id: 'd_robot1',
-          clientId: undefined,
-          hostName: 'robot1',
-          robotName: 'robot1',
-        },
-        {
-          id: 'd_robot2',
-          clientId: undefined,
-          hostName: 'robot2',
-          robotName: 'robot2',
-        },
-      ]
-    );
+    expect(mockDb.syncRobotsSnapshot).toHaveBeenCalledWith([
+      {
+        id: 'd_robot1',
+        clientId: undefined,
+        hostName: 'robot1',
+        robotName: 'robot1',
+      },
+      {
+        id: 'd_robot2',
+        clientId: undefined,
+        hostName: 'robot2',
+        robotName: 'robot2',
+      },
+    ]);
 
     expect(res.body).toEqual({
       ok: true,

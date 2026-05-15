@@ -1,5 +1,14 @@
 import { Pool } from 'pg';
 import { UserInfo } from './types.js';
+import { User } from '../../domain/models/user.js';
+
+function toUserInfo(user: User): UserInfo {
+  return {
+    id: user.getId(),
+    email: user.getEmail(),
+    clientId: user.getClientId() ?? null,
+  };
+}
 
 export function createUserOps(pool: Pool) {
   return {
@@ -11,11 +20,8 @@ export function createUserOps(pool: Pool) {
         [email]
       );
       if (!rows[0]) return null;
-      return {
-        id: rows[0].id,
-        email: rows[0].email,
-        clientId: rows[0].client_id,
-      };
+
+      return toUserInfo(User.reconstruct(rows[0].id, rows[0].email, rows[0].client_id ?? undefined));
     },
 
     async getUserById(id: string) {
@@ -26,11 +32,8 @@ export function createUserOps(pool: Pool) {
         [id]
       );
       if (!rows[0]) return null;
-      return {
-        id: rows[0].id,
-        email: rows[0].email,
-        clientId: rows[0].client_id,
-      };
+
+      return toUserInfo(User.reconstruct(rows[0].id, rows[0].email, rows[0].client_id ?? undefined));
     },
 
     async getUsersByClient(clientId: string) {
@@ -41,11 +44,7 @@ export function createUserOps(pool: Pool) {
          ORDER BY email ASC`,
         [clientId]
       );
-      return rows.map(r => ({
-        id: r.id,
-        email: r.email,
-        clientId: r.client_id,
-      }));
+      return rows.map(r => toUserInfo(User.reconstruct(r.id, r.email, r.client_id ?? undefined)));
     },
 
     async getAllUsers() {
@@ -54,14 +53,12 @@ export function createUserOps(pool: Pool) {
          FROM "user"
          ORDER BY email ASC`
       );
-      return rows.map(r => ({
-        id: r.id,
-        email: r.email,
-        clientId: r.client_id,
-      }));
+      return rows.map(r => toUserInfo(User.reconstruct(r.id, r.email, r.client_id ?? undefined)));
     },
 
     async createUser(userId: string, email: string, clientId?: string) {
+      const user = User.create(userId, email, clientId);
+
       const { rows } = await pool.query(
         `INSERT INTO "user" (id, email, client_id)
         VALUES ($1, $2, $3)
@@ -70,7 +67,7 @@ export function createUserOps(pool: Pool) {
           email = EXCLUDED.email,
           client_id = COALESCE(EXCLUDED.client_id, "user".client_id)
         RETURNING id`,
-        [userId, email, clientId ?? null]
+        [user.getId(), user.getEmail(), user.getClientId() ?? null]
       );
 
       return rows[0]?.id || '';
@@ -84,7 +81,7 @@ export function createUserOps(pool: Pool) {
       );
     },
 
-    async updateUserClient(userId: string, clientId: string) {
+    async updateUserClient(userId: string, clientId: string | null) {
       await pool.query(
         `UPDATE "user"
         SET client_id = $2
@@ -156,6 +153,8 @@ export function createUserOps(pool: Pool) {
         await client.query('BEGIN');
 
         for (const { username, email } of users) {
+          const user = User.create(username, email);
+
           await client.query(
             `INSERT INTO "user" (id, email)
             VALUES ($1, $2)
@@ -163,7 +162,7 @@ export function createUserOps(pool: Pool) {
             DO UPDATE SET
               email = EXCLUDED.email
             RETURNING id`,
-            [username, email]
+            [user.getId(), user.getEmail()]
           );
         }
 

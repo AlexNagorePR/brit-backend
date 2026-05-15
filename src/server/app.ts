@@ -4,12 +4,14 @@ import session from 'express-session';
 import FileStoreFactory from 'session-file-store';
 import path from 'path';
 import fs from 'node:fs';
+import swaggerUi from 'swagger-ui-express';
 
 import utils from '@transitive-sdk/utils';
 import { loadConfig } from '@/server/config.js';
 import { createDb } from '@/server/db.js';
 import { createCognitoAdminService } from './cognito-admin.js';
 import { createCollector } from '@/server/collector.js';
+import { specs } from '@/server/swagger.js';
 import { createAuthRouter } from '@/server/routes/auth.js';
 import { createApiRouter } from '@/server/routes/api.js';
 import { createAdminUsersRouter } from '@/server/routes/admin/users.js';
@@ -74,6 +76,13 @@ export function createApp(deps: { oidcClient?: OidcClientLike } = {}) {
       },
     })
   );
+
+  // Swagger UI
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(specs, { 
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  }));
 
   // Register routers
   app.use('/auth', createAuthRouter(config, oidcClient));

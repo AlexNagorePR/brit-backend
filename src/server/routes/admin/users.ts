@@ -1,13 +1,88 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
+import { ClientNotFoundError } from '@/application/use-cases/clients/errors.js';
+import { FindClientById } from '@/application/use-cases/clients/find-client-by-id.js';
+import { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
+import { CreateUser } from '@/application/use-cases/users/create-user.js';
+import { DeleteUser } from '@/application/use-cases/users/delete-user.js';
+import { UserNotFoundError } from '@/application/use-cases/users/errors.js';
+import { FindUserById } from '@/application/use-cases/users/find-user-by-id.js';
+import { ListUsers } from '@/application/use-cases/users/list-users.js';
+import { ListUsersByClient } from '@/application/use-cases/users/list-users-by-client.js';
+import { SyncCognitoUsers } from '@/application/use-cases/users/sync-cognito-users.js';
+import { UpdateUserClient } from '@/application/use-cases/users/update-user-client.js';
+import { createDbClientRepository } from '@/infrastructure/db/client-repository.js';
+import { createDbUserRepository } from '@/infrastructure/db/user-repository.js';
 import { requireAdmin } from '@/server/auth.js';
 
 const log = utils.getLogger('routes/admin/users');
 
 export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) {
   const router = Router();
+  const clientRepository = createDbClientRepository(db);
+  const findClientById = new FindClientById(clientRepository);
+  const findClientByName = new FindClientByName(clientRepository);
+  const userRepository = createDbUserRepository(db);
+  const createUser = new CreateUser(userRepository);
+  const deleteUser = new DeleteUser(userRepository);
+  const findUserById = new FindUserById(userRepository);
+  const listUsers = new ListUsers(userRepository);
+  const listUsersByClient = new ListUsersByClient(userRepository);
+  const syncCognitoUsers = new SyncCognitoUsers(userRepository);
+  const updateUserClient = new UpdateUserClient(userRepository);
 
   router.get('/', requireAdmin, async (_req, res) => {
+    /**
+     * @swagger
+     * /admin/users:
+     *   get:
+     *     summary: List all users from Cognito and database
+     *     description: Fetches all users from Cognito, syncs them with the database, and returns both lists
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     responses:
+     *       200:
+     *         description: Users retrieved and synced successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 cognitoUsers:
+     *                   type: array
+     *                   items:
+     *                     type: object
+     *                     properties:
+     *                       username:
+     *                         type: string
+     *                         example: "user@example.com"
+     *                       enabled:
+     *                         type: boolean
+     *                       groups:
+     *                         type: array
+     *                         items:
+     *                           type: string
+     *                 dbUsers:
+     *                   type: array
+     *                   items:
+     *                     type: object
+     *                     properties:
+     *                       id:
+     *                         type: string
+     *                       email:
+     *                         type: string
+     *                       clientId:
+     *                         type: string
+     *                         nullable: true
+     *                 synced:
+     *                   type: boolean
+     *       401:
+     *         description: User not authenticated or not admin
+     *       502:
+     *         description: Error fetching users from Cognito
+     */
     try {
       log.info('Fetching Cognito users...');
       const cognitoUsers = await cognitoAdmin.listUsers();
@@ -20,7 +95,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
       log.info(`Syncing ${usersToSync.length} users to database`, { users: usersToSync });
 
       try {
-        await db.syncCognitoUsers(usersToSync);
+        await syncCognitoUsers.execute(usersToSync);
         log.info('Users synced to database successfully');
       } catch (syncErr) {
         log.error('Failed to sync users to database', { error: syncErr });
@@ -30,7 +105,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
       // Also get users from DB to return enriched data
       let dbUsers: any[] = [];
       try {
-        dbUsers = await db.getAllUsers();
+        dbUsers = await listUsers.execute();
         log.info(`Fetched ${dbUsers.length} users from database`, { users: dbUsers });
       } catch (dbErr) {
         log.error('Failed to fetch users from database', { error: dbErr });
@@ -48,6 +123,24 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.post('/sync', requireAdmin, async (_req, res) => {
+    /**
+     * @swagger
+     * /admin/users/sync:
+     *   post:
+     *     summary: Manually sync users from Cognito to database
+     *     description: Fetches all users from Cognito and synchronizes them with the database
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     responses:
+     *       200:
+     *         description: Users synced successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       502:
+     *         description: Sync failed
+     */
     log.info('Manual sync request for users');
     try {
       log.info('Fetching all users from Cognito...');
@@ -63,13 +156,13 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
       log.info(`Extracted ${usersToSync.length} users from Cognito`, { users: usersToSync });
 
       log.info(`Syncing to database`);
-      await db.syncCognitoUsers(usersToSync);
+      const result = await syncCognitoUsers.execute(usersToSync);
       log.info('Sync completed successfully');
 
       return res.json({
         ok: true,
-        count: usersToSync.length,
-        users: usersToSync,
+        count: result.count,
+        users: result.users,
       });
     } catch (err) {
       log.error('User sync failed', { error: err, stack: err instanceof Error ? err.stack : undefined });
@@ -78,6 +171,48 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.post('/', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users:
+     *   post:
+     *     summary: Create a new user
+     *     description: Creates a new user in Cognito and stores them in the database
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             required:
+     *               - email
+     *             properties:
+     *               email:
+     *                 type: string
+     *                 format: email
+     *               givenName:
+     *                 type: string
+     *               familyName:
+     *                 type: string
+     *               groups:
+     *                 type: array
+     *                 items:
+     *                   type: string
+     *               clientId:
+     *                 type: string
+     *     responses:
+     *       201:
+     *         description: User created successfully
+     *       400:
+     *         description: Missing email or invalid groups
+     *       401:
+     *         description: User not authenticated or not admin
+     *       502:
+     *         description: Cognito operation failed
+     */
     const { email, groups, temporaryPassword, givenName, familyName, clientId } = req.body || {};
 
     console.log('Create user request', { email, groups, givenName, familyName, clientId });
@@ -108,7 +243,11 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
       });
       log.info('User created in Cognito successfully', { email });
 
-      await db.createUser(user.username, email, clientId);
+      await createUser.execute({
+        id: user.username,
+        email,
+        clientId,
+      });
       log.info('User created in database successfully', { email, clientId });
 
       return res.status(201).json(user);
@@ -119,10 +258,28 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.get('/db-users', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/db-users:
+     *   get:
+     *     summary: Get all users from database
+     *     description: Returns only users stored in the local database
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     responses:
+     *       200:
+     *         description: Database users retrieved successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       500:
+     *         description: Database error
+     */
     try {
       log.info('Fetching all users from database');
       
-      const users = await db.getAllUsers();
+      const users = await listUsers.execute();
       log.info(`Fetched ${users.length} users from database`, { users });
 
       return res.json({
@@ -136,6 +293,32 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.get('/:username', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/{username}:
+     *   get:
+     *     summary: Get user by username
+     *     description: Retrieves information about a specific user from Cognito
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: username
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: User retrieved successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       404:
+     *         description: User not found
+     *       502:
+     *         description: Cognito operation failed
+     */
     try {
       const user = await cognitoAdmin.getUser(req.params.username);
       return res.json(user);
@@ -151,6 +334,43 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.post('/:username/groups', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/{username}/groups:
+     *   post:
+     *     summary: Set user groups
+     *     description: Updates the groups for a user (allowed, admin)
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: username
+     *         required: true
+     *         schema:
+     *           type: string
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             properties:
+     *               groups:
+     *                 type: array
+     *                 items:
+     *                   type: string
+     *     responses:
+     *       200:
+     *         description: User groups updated successfully
+     *       400:
+     *         description: Groups must be array or invalid group names
+     *       401:
+     *         description: User not authenticated or not admin
+     *       502:
+     *         description: Cognito operation failed
+     */
     const username = req.params.username;
     const { groups } = req.body || {};
 
@@ -189,8 +409,8 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
       }
 
       const updatedUser = await cognitoAdmin.getUser(username);
-      const dbUser = await db.getUserById(username);
-      const client = dbUser?.clientId ? await db.getClient(dbUser.clientId) : null;
+      const dbUser = await findUserById.execute(username);
+      const client = dbUser?.clientId ? await findClientById.execute(dbUser.clientId) : null;
 
       return res.json({
         ...updatedUser,
@@ -204,6 +424,32 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.post('/:username/disable', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/{username}/disable:
+     *   post:
+     *     summary: Disable a user
+     *     description: Disables a user account in Cognito
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: username
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: User disabled successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       404:
+     *         description: User not found
+     *       502:
+     *         description: Cognito operation failed
+     */
     try {
       await cognitoAdmin.disableUser(req.params.username);
       return res.json({ ok: true, username: req.params.username, enabled: false });
@@ -219,6 +465,32 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.post('/:username/enable', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/{username}/enable:
+     *   post:
+     *     summary: Enable a user
+     *     description: Enables a disabled user account in Cognito
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: username
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: User enabled successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       404:
+     *         description: User not found
+     *       502:
+     *         description: Cognito operation failed
+     */
     try {
       await cognitoAdmin.enableUser(req.params.username);
       return res.json({ ok: true, username: req.params.username, enabled: true });
@@ -234,6 +506,44 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   });
 
   router.patch('/:username/client', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/{username}/client:
+     *   patch:
+     *     summary: Assign or remove client for user
+     *     description: Associates a user with a client or removes the association
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: username
+     *         required: true
+     *         schema:
+     *           type: string
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             properties:
+     *               clientId:
+     *                 type: string
+     *                 nullable: true
+     *     responses:
+     *       200:
+     *         description: User client assignment updated successfully
+     *       400:
+     *         description: clientId must be string or null
+     *       401:
+     *         description: User not authenticated or not admin
+     *       404:
+     *         description: User not found in database
+     *       500:
+     *         description: Update failed
+     */
     const username = req.params.username;
     const { clientId } = req.body || "VACIO";
 
@@ -245,42 +555,56 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     }
 
     try {
-      const user = await db.getUserById(username);
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found in database' });
-      }
-
-      if (clientId) {
-        await db.updateUserClient(user.id, clientId);
-
-        return res.json({
-          ok: true,
-          username,
-          userId: user.id,
-          email: user.email,
-          clientId,
-          clientName: null,
-        });
-      }
-
-      await db.updateUserClient(user.id, null as any);
+      const user = await updateUserClient.execute({
+        userId: username,
+        clientId,
+      });
 
       return res.json({
         ok: true,
         username,
         userId: user.id,
         email: user.email,
-        clientId: null,
+        clientId: user.clientId,
         clientName: null,
       });
     } catch (err) {
+      if (err instanceof UserNotFoundError) {
+        return res.status(404).json({ error: 'User not found in database' });
+      }
+
       log.error('Update user client failed', { username, clientId, error: err });
       return res.status(500).json({ error: 'Update user client failed' });
     }
   });
 
   router.delete('/:username', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/{username}:
+     *   delete:
+     *     summary: Delete a user
+     *     description: Deletes a user from Cognito and database. Cannot delete your own account
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: username
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: User deleted successfully
+     *       400:
+     *         description: Cannot delete your own account
+     *       401:
+     *         description: User not authenticated or not admin
+     *       502:
+     *         description: Cognito operation failed
+     */
     const username = req.params.username;
 
     if (req.session.user?.email === username) {
@@ -292,7 +616,7 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
     try {
       await cognitoAdmin.deleteUser(username);
 
-      await db.deleteUser(username);
+      await deleteUser.execute(username);
 
       return res.json({ ok: true, username });
     } catch (err) {
@@ -302,16 +626,38 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
   })
 
   router.get('/by-client/:clientName', requireAdmin, async (req, res) => {
+    /**
+     * @swagger
+     * /admin/users/by-client/{clientName}:
+     *   get:
+     *     summary: Get all users for a specific client
+     *     description: Returns all users assigned to a particular client
+     *     tags:
+     *       - Admin - Users
+     *     security:
+     *       - sessionCookie: []
+     *     parameters:
+     *       - in: path
+     *         name: clientName
+     *         required: true
+     *         schema:
+     *           type: string
+     *     responses:
+     *       200:
+     *         description: Users retrieved successfully
+     *       401:
+     *         description: User not authenticated or not admin
+     *       404:
+     *         description: Client not found
+     *       500:
+     *         description: Query failed
+     */
     const clientName = req.params.clientName;
 
     try {
-      const client = await db.getClientByName(clientName);
+      const client = await findClientByName.execute(clientName);
 
-      if (!client) {
-        return res.status(404).json({ error: 'Client not found' });
-      }
-
-      const users = await db.getUsersByClient(client.id);
+      const users = await listUsersByClient.execute(client.id);
 
       return res.json({
         clientId: client.id,
@@ -319,6 +665,10 @@ export function createAdminUsersRouter(config: any, db: any, cognitoAdmin: any) 
         users,
       });
     } catch (err) {
+      if (err instanceof ClientNotFoundError) {
+        return res.status(404).json({ error: err.message });
+      }
+
       log.error('Get users for client failed', err);
       return res.status(500).json({ error: 'Get users for client failed' });
     }

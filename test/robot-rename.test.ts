@@ -7,7 +7,6 @@ const mockDb = vi.hoisted(() => ({
   createUser: vi.fn(),
   deleteUser: vi.fn(),
   getAllRobots: vi.fn(),
-  upsertRobot: vi.fn(),
   updateRobotName: vi.fn(),
   deleteRobot: vi.fn(),
   syncRobotsSnapshot: vi.fn(),

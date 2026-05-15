@@ -1,10 +1,11 @@
 import utils from '@transitive-sdk/utils';
 
+import type { PortalApi } from '@/application/ports/portal-api.js';
+import { createPortalApi } from '@/infrastructure/portal/portal-api.js';
 import type { Db, RobotInfo } from '@/server/db.js';
-import { subscribeTelemetry } from '@/server/telemetry.js';
+import { subscribeTelemetry } from '@/server/device-data-stream.js';
 import { subscribeWorkInfo } from '@/server/brit-info-work.js';
 import { subscribeRobotInfo } from '@/server/brit-info-robot.js';
-import { fetchPortalApi, signPortalApiJWT } from '@/server/portal.js';
 
 const log = utils.getLogger('collector');
 log.setLevel('debug');
@@ -13,12 +14,14 @@ type CollectorDeps = {
   db: Db;
   jwtSecret: string;
   transitiveUser: string;
+  portalApi?: PortalApi;
 };
 
 class CollectorService {
   private db: Db;
   private jwtSecret: string;
   private transitiveUser: string;
+  private portalApi: PortalApi;
 
   private started = false;
   private telemetrySubscribedDevices = new Set<string>();
@@ -30,6 +33,10 @@ class CollectorService {
     this.db = deps.db;
     this.jwtSecret = deps.jwtSecret;
     this.transitiveUser = deps.transitiveUser;
+    this.portalApi = deps.portalApi ?? createPortalApi({
+      jwtSecret: deps.jwtSecret,
+      transitiveUser: deps.transitiveUser,
+    });
   }
 
   async start() {
@@ -164,18 +171,7 @@ class CollectorService {
 
   async loadRunningRobots(): Promise<Record<string, any>> {
     try {
-      const token = signPortalApiJWT({
-        jwtSecret: this.jwtSecret,
-        transitiveUser: this.transitiveUser,
-        validitySeconds: 60,
-      });
-
-      const data = await fetchPortalApi<Record<string, any>>(
-        token,
-        'https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1/running/',
-        { timeoutMs: 14000 }
-      );
-
+      const data = await this.portalApi.listRunningRobots();
       return data || {};
     } catch (err) {
       log.error('Collector failed loading running robots from portal', err);
