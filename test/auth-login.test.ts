@@ -14,7 +14,7 @@ vi.mock('@/server/auth.js', () => ({
   requireAdmin: (req: any, _res: any, next: any) => next(),
 }));
 
-import { createApp } from '@/server/app.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
 
 describe('Auth', () => {
   beforeEach(() => {
@@ -45,6 +45,7 @@ describe('Auth', () => {
         claims: () => ({
           sub: 'subject-1',
           email: 'user@example.com',
+          'cognito:username': 'user-1',
           'cognito:groups': ['allowed', 'admin'],
         }),
       })),
@@ -73,7 +74,7 @@ describe('Auth', () => {
       expect.anything(),
       {
         account: {
-          _id: 'user@example.com',
+          _id: 'user-1',
           email: 'user@example.com',
           admin: true,
           verified: true,

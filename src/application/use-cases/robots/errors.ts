@@ -11,3 +11,10 @@ export class RobotNotFoundError extends Error {
     this.name = 'RobotNotFoundError';
   }
 }
+
+export class RobotAccessDeniedError extends Error {
+  constructor(message = 'Robot not found') {
+    super(message);
+    this.name = 'RobotAccessDeniedError';
+  }
+}

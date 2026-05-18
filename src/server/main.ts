@@ -1,40 +1,28 @@
-// src/server/main.ts
-import { Issuer } from 'openid-client';
 import utils from '@transitive-sdk/utils';
 
 import { loadConfig } from '@/server/config.js';
 import { createApp } from '@/server/app.js';
+import { createAppComposition } from '@/server/composition.js';
+import { createOidcClient } from '@/infrastructure/auth/oidc-client.js';
 
 const log = utils.getLogger('main');
 log.setLevel('debug');
 
 const config = loadConfig();
 
-async function initializeOIDCClient() {
-  const issuer = await Issuer.discover(
-    config.cognitoIssuerUrl,
-  );
-
-  const oidcClient = new issuer.Client({
-    client_id: config.cognitoClientId,
-    client_secret: config.cognitoClientSecret,
-    redirect_uris: [config.cognitoRedirectUri],
-    response_types: ['code'],
-  });
+async function start() {
+  const { oidcClient, info } = await createOidcClient(config);
 
   log.info('OIDC client initialized', {
-    issuer: issuer.issuer,
-    client_id: oidcClient.metadata.client_id,
-    redirect_uris: oidcClient.metadata.redirect_uris,
+    issuer: info.issuer,
+    client_id: info.clientId,
+    redirect_uris: info.redirectUris,
   });
 
-  return oidcClient;
-}
+  const composition = createAppComposition(config, { oidcClient });
+  const app = createApp({ config, composition });
 
-async function start() {
-  const oidcClient = await initializeOIDCClient();
-
-  const app = createApp({ oidcClient });
+  composition.collector.start().catch(err => log.error('Collector failed to start', err));
 
   const server = app.listen(config.port, () => {
     console.log(`Server is listening on port ${config.port}`);

@@ -1,4 +1,4 @@
-import { signRosToolJWT } from "@/server/portal.js";
+import { signRosToolJWT } from "@/infrastructure/transitive/transitive-tokens.js";
 import type { DeviceInfoSubscriber } from '@/application/ports/device-info-subscriber.js';
 import type { Db } from "@/infrastructure/db/postgres/index.js";
 import utils from "@transitive-sdk/utils";

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '@/server/app.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
 
 const mockDb = vi.hoisted(() => ({
   getClientByName: vi.fn(),

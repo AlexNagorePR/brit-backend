@@ -14,7 +14,7 @@ export type RobotInfo = {
   clientId?: string | null;
   hostName: string;
   robotName: string;
-  userEmails?: string[];
+  userIds?: string[];
   deliveryDate?: string;
   lastMaint?: string;
   lastClean?: string;

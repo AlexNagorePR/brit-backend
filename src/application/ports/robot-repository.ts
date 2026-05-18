@@ -6,7 +6,7 @@ export type RobotReadModel = {
   hostName?: string;
   robotName?: string;
   clientName?: string | null;
-  userEmails?: string[];
+  userIds?: string[];
   [key: string]: unknown;
 };
 
@@ -17,11 +17,11 @@ export type RobotDetailsReadModel = RobotReadModel & {
 
 export interface RobotRepository {
   list(): Promise<RobotReadModel[]>;
-  listForUser(userEmail: string): Promise<RobotReadModel[]>;
+  listForUser(userId: string): Promise<RobotReadModel[]>;
   findById(robotId: string): Promise<RobotDetailsReadModel | null>;
   updateName(robotId: string, name: string): Promise<void>;
   updateClient(robotId: string, clientId?: string): Promise<void>;
   syncSnapshot(robots: Robot[]): Promise<void>;
   listUsers(robotId: string): Promise<string[]>;
-  setUsers(robotId: string, userEmails: string[]): Promise<void>;
+  setUsers(robotId: string, userIds: string[]): Promise<void>;
 }

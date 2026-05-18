@@ -224,7 +224,7 @@ Lista robots accesibles por el usuario actual.
     "clientId": "string",
     "hostName": "string",
     "robotName": "string",
-    "userEmails": ["string"],
+    "userIds": ["string"],
     "deliveryDate": "ISO8601",
     "lastMaint": "ISO8601",
     "lastClean": "ISO8601",
@@ -260,17 +260,17 @@ Renombra un robot.
 ### 👨‍💼 Administración de Usuarios (requiere `admin`)
 
 #### `GET /admin/users`
-Lista usuarios de Cognito y sincroniza con BD.
+Lista usuarios de la identidad y sincroniza con BD.
 - **Autenticación**: Requerida (admin)
 - **Respuesta**:
 ```json
 {
-  "cognitoUsers": [ /* usuarios de Cognito */ ],
+  "identityUsers": [ /* usuarios del proveedor de identidad */ ],
   "dbUsers": [ /* usuarios de BD */ ],
   "synced": true
 }
 ```
-- **Códigos de estado**: 200 (OK), 502 (Error Cognito)
+- **Códigos de estado**: 200 (OK), 502 (Error proveedor identidad)
 
 #### `GET /admin/db-users`
 Lista todos los usuarios de la base de datos.
@@ -405,7 +405,7 @@ Elimina un usuario (de Cognito y BD).
 ```
 - **Códigos de estado**: 200 (OK), 400 (No puede eliminarse a sí mismo), 502 (Error Cognito)
 
-#### `GET /admin/users/:clientName`
+#### `GET /admin/users/by-client/:clientName`
 Obtiene usuarios de un cliente específico.
 - **Autenticación**: Requerida (admin)
 - **Parámetros de ruta**: `clientName` (string)
@@ -453,7 +453,7 @@ Obtiene información detallada de un robot específico (incluye trabajos, limpie
   "clientName": "string",
   "hostName": "string",
   "robotName": "string",
-  "userEmails": ["string"],
+  "userIds": ["string"],
   "works": [
     {
       "id": "string",
@@ -704,4 +704,3 @@ npx tsc --noEmit
 - **Telemetry**: Recopila telemetría de robots en tiempo real
 - **HealthMonitoring**: Se suscribe a diagnósticos de salud de dispositivos desde MQTT
 - **Database**: Capa de persistencia PostgreSQL
-

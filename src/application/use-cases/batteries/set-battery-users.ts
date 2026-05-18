@@ -19,11 +19,21 @@ export class SetBatteryUsers {
       throw new BatteryValidationError('userIds must be an array');
     }
 
-    await this.batteryRepository.setUsers(command.id, command.userIds);
+    if (!command.userIds.every((userId: unknown): userId is string => typeof userId === 'string')) {
+      throw new BatteryValidationError('userIds must be an array of strings');
+    }
+
+    const userIds = [...new Set(
+      command.userIds
+        .map((userId) => userId.trim())
+        .filter(Boolean)
+    )];
+
+    await this.batteryRepository.setUsers(command.id, userIds);
 
     return {
       batteryId: command.id,
-      userIds: command.userIds,
+      userIds,
     };
   }
 }

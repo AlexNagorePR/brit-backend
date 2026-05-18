@@ -1,9 +1,6 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
 import { requireAdmin } from '@/server/auth.js';
-import {
-  ClientNotFoundError,
-} from '@/application/use-cases/batteries/create-battery.js';
 import type { CreateBattery } from '@/application/use-cases/batteries/create-battery.js';
 import type { DeleteBattery } from '@/application/use-cases/batteries/delete-battery.js';
 import type { GetBattery } from '@/application/use-cases/batteries/get-battery.js';
@@ -14,6 +11,7 @@ import type { UpdateBatterySerialNumber } from '@/application/use-cases/batterie
 import {
   BatteryNotFoundError,
   BatteryValidationError,
+  ClientNotFoundError,
 } from '@/application/use-cases/batteries/errors.js';
 
 const log = utils.getLogger('routes/admin/batteries');
@@ -291,7 +289,7 @@ export function createAdminBatteriesRouter(deps: AdminBatteriesRouterDeps) {
    * /admin/batteries/{id}/users:
    *   put:
    *     summary: Set users for a battery
-   *     description: Updates the users assigned to a battery (replaces all current users)
+   *     description: Updates the user IDs assigned to a battery (replaces all current users)
    *     tags:
    *       - Admin - Batteries
    *     security:
@@ -311,6 +309,7 @@ export function createAdminBatteriesRouter(deps: AdminBatteriesRouterDeps) {
    *             properties:
    *               userIds:
    *                 type: array
+   *                 description: User IDs to assign to the battery
    *                 items:
    *                   type: string
    *     responses:
@@ -367,6 +366,17 @@ export function createAdminBatteriesRouter(deps: AdminBatteriesRouterDeps) {
    *     responses:
    *       200:
    *         description: Battery users retrieved successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 type: object
+   *                 properties:
+   *                   id:
+   *                     type: string
+   *                   email:
+   *                     type: string
    *       401:
    *         description: User not authenticated or not admin
    *       500:

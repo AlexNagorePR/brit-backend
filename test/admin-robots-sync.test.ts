@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '@/server/app.js';
-import { fetchPortalApi, signPortalApiJWT } from '@/server/portal.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
+import { fetchPortalApi } from '@/infrastructure/portal/portal-http-client.js';
+import { signPortalApiJWT } from '@/infrastructure/portal/portal-token.js';
 
 const mockDb = vi.hoisted(() => ({
   getRobotIdsForUser: vi.fn(),
@@ -31,8 +32,11 @@ vi.mock('@/server/auth.js', () => ({
   },
 }));
 
-vi.mock('@/server/portal.js', () => ({
+vi.mock('@/infrastructure/portal/portal-token.js', () => ({
   signPortalApiJWT: vi.fn(() => 'mock-portal-jwt'),
+}));
+
+vi.mock('@/infrastructure/portal/portal-http-client.js', () => ({
   fetchPortalApi: vi.fn(),
 }));
 

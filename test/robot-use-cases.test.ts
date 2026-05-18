@@ -46,8 +46,8 @@ describe('Robot use cases', () => {
     });
     const useCase = new ListRobotsForUser(repository as any);
 
-    await expect(useCase.execute('one@example.com')).resolves.toEqual(robots);
-    expect(repository.listForUser).toHaveBeenCalledWith('one@example.com');
+    await expect(useCase.execute('user-1')).resolves.toEqual(robots);
+    expect(repository.listForUser).toHaveBeenCalledWith('user-1');
   });
 
   it('gets a robot by id', async () => {
@@ -143,14 +143,14 @@ describe('Robot use cases', () => {
 
     await expect(useCase.execute({
       robotId: 'robot-1',
-      userIds: [' ONE@EXAMPLE.COM ', 'one@example.com', '', 'two@example.com'],
+      userIds: [' user-1 ', 'user-1', '', 'User-2'],
     })).resolves.toEqual({
       robotId: 'robot-1',
-      userIds: ['one@example.com', 'two@example.com'],
+      userIds: ['user-1', 'User-2'],
     });
     expect(repository.setUsers).toHaveBeenCalledWith('robot-1', [
-      'one@example.com',
-      'two@example.com',
+      'user-1',
+      'User-2',
     ]);
   });
 
@@ -160,18 +160,18 @@ describe('Robot use cases', () => {
 
     await expect(useCase.execute({
       robotId: 'robot-1',
-      userIds: 'one@example.com',
+      userIds: 'user-1',
     })).rejects.toThrow(RobotValidationError);
     expect(repository.setUsers).not.toHaveBeenCalled();
   });
 
   it('lists robot users', async () => {
     const repository = createRepository({
-      listUsers: vi.fn().mockResolvedValue(['one@example.com']),
+      listUsers: vi.fn().mockResolvedValue(['user-1']),
     });
     const useCase = new ListRobotUsers(repository as any);
 
-    await expect(useCase.execute('robot-1')).resolves.toEqual(['one@example.com']);
+    await expect(useCase.execute('robot-1')).resolves.toEqual(['user-1']);
     expect(repository.listUsers).toHaveBeenCalledWith('robot-1');
   });
 

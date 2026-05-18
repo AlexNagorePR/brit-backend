@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '@/server/app.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
 
 const mockDb = vi.hoisted(() => ({
   getRobotById: vi.fn(),
@@ -46,7 +46,7 @@ describe('Admin robot get', () => {
       clientName: 'Client One',
       hostName: 'host1',
       robotName: 'Robot One',
-      userEmails: ['u@example.com'],
+      userIds: ['u1'],
       works: [
         {
           id: 'w1',

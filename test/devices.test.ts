@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '@/server/app.js';
-import { fetchPortalApi, signPortalApiJWT } from '@/server/portal.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
+import { fetchPortalApi } from '@/infrastructure/portal/portal-http-client.js';
+import { signPortalApiJWT } from '@/infrastructure/portal/portal-token.js';
 
 const mockDb = vi.hoisted(() => ({
   getRobotIdsForUser: vi.fn(),
@@ -35,8 +36,11 @@ vi.mock('@/server/auth.js', () => ({
   },
 }));
 
-vi.mock('@/server/portal.js', () => ({
+vi.mock('@/infrastructure/portal/portal-token.js', () => ({
   signPortalApiJWT: vi.fn(() => 'mock-portal-jwt'),
+}));
+
+vi.mock('@/infrastructure/portal/portal-http-client.js', () => ({
   fetchPortalApi: vi.fn(),
 }));
 
@@ -88,7 +92,7 @@ describe('Devices', () => {
     const res = await request(app).get('/api/devices').expect(200);
 
     expect(mockDb.getRobotIdsForUser).toHaveBeenCalledTimes(1);
-    expect(mockDb.getRobotIdsForUser).toHaveBeenCalledWith('user@example.com');
+    expect(mockDb.getRobotIdsForUser).toHaveBeenCalledWith('u1');
     expect(signPortalApiJWT).toHaveBeenCalledTimes(1);
     expect(fetchPortalApi).toHaveBeenCalledTimes(2);
 
@@ -175,7 +179,7 @@ describe('Devices', () => {
       })
       .expect(200);
 
-    expect(mockDb.getRobotIdsForUser).toHaveBeenCalledWith('user@example.com');
+    expect(mockDb.getRobotIdsForUser).toHaveBeenCalledWith('u1');
     expect(mockCommandPublisher.initialize).toHaveBeenCalledWith('d1');
     expect(mockCommandPublisher.publish).toHaveBeenCalledWith('d1', '/ink_level', message);
     expect(res.body).toEqual({

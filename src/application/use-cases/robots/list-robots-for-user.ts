@@ -6,7 +6,7 @@ import type {
 export class ListRobotsForUser {
   constructor(private readonly robotRepository: RobotRepository) {}
 
-  execute(userEmail: string): Promise<RobotReadModel[]> {
-    return this.robotRepository.listForUser(userEmail);
+  execute(userId: string): Promise<RobotReadModel[]> {
+    return this.robotRepository.listForUser(userId);
   }
 }

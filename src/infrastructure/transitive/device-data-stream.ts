@@ -1,4 +1,4 @@
-import { signRosToolJWT } from '@/server/portal.js';
+import { signRosToolJWT } from '@/infrastructure/transitive/transitive-tokens.js';
 import utils from '@transitive-sdk/utils';
 import type { DeviceTelemetryStream } from '@/application/ports/device-telemetry-stream.js';
 import {

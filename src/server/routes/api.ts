@@ -1,14 +1,18 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import utils from '@transitive-sdk/utils';
-import type { DeviceCommandPublisher } from '@/application/ports/device-command-publisher.js';
-import type { DeviceTelemetryStream } from '@/application/ports/device-telemetry-stream.js';
-import type { ListRunningDevices } from '@/application/use-cases/devices/list-running-devices.js';
-import { RobotValidationError } from '@/application/use-cases/robots/errors.js';
+import {
+  DeviceAccessDeniedError,
+  DeviceDataSourceError,
+  DeviceValidationError,
+} from '@/application/use-cases/devices/errors.js';
+import type { GetDeviceTelemetry } from '@/application/use-cases/devices/get-device-telemetry.js';
+import type { ListAccessibleDevices } from '@/application/use-cases/devices/list-accessible-devices.js';
+import type { PublishDeviceCommand } from '@/application/use-cases/devices/publish-device-command.js';
+import { RobotAccessDeniedError, RobotValidationError } from '@/application/use-cases/robots/errors.js';
 import type { ListRobotsForUser } from '@/application/use-cases/robots/list-robots-for-user.js';
-import type { UpdateRobotName } from '@/application/use-cases/robots/update-robot-name.js';
+import type { RenameAccessibleRobot } from '@/application/use-cases/robots/rename-accessible-robot.js';
 import { requireLogin } from '@/server/auth.js';
-import type { RobotReadModel } from '@/application/ports/robot-repository.js';
 
 const log = utils.getLogger('routes/api');
 
@@ -18,11 +22,11 @@ type ApiRouterConfig = {
 };
 
 export type ApiRouterDeps = {
-  listRunningDevices: ListRunningDevices;
+  getDeviceTelemetry: GetDeviceTelemetry;
+  listAccessibleDevices: ListAccessibleDevices;
   listRobotsForUser: ListRobotsForUser;
-  updateRobotName: UpdateRobotName;
-  telemetryStream: DeviceTelemetryStream;
-  commandPublisher: DeviceCommandPublisher;
+  publishDeviceCommand: PublishDeviceCommand;
+  renameAccessibleRobot: RenameAccessibleRobot;
 };
 
 export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
@@ -54,9 +58,11 @@ export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
    *                   properties:
    *                     _id:
    *                       type: string
-   *                       example: "user@example.com"
+   *                       description: User ID from the identity provider
+   *                       example: "user-1"
    *                     email:
    *                       type: string
+   *                       format: email
    *                       example: "user@example.com"
    *                     admin:
    *                       type: boolean
@@ -208,33 +214,27 @@ export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
      *       502:
      *         description: Portal API request failed
      */
-    const userEmail = req.session.user!.email!;
-
-    console.log('Fetching devices for user', userEmail);
-
-    let robots: RobotReadModel[];
     try {
-      robots = await deps.listRobotsForUser.execute(userEmail);
-    } catch (err) {
-      log.error('DB failed on /api/devices', err);
-      return res.status(500).json({ error: 'Devices failed' });
-    }
-
-    try {
-      const results = await deps.listRunningDevices.execute(robots);
-
-      for (const device of results) {
-        if (device.hasRosTool) {
-          deps.telemetryStream
-            .subscribe(device.id)
-            .catch(err => log.error(`Telemetry subscribe failed for ${device.id}`, err));
-        }
-      }
+      const results = await deps.listAccessibleDevices.execute({
+        userId: req.session.user!._id,
+      });
 
       return res.json(results);
     } catch (err) {
-      log.error('Portal API failed on /api/devices', err);
-      return res.status(502).json({ error: 'Portal API request failed' });
+      if (err instanceof DeviceDataSourceError) {
+        if (err.source === 'database') {
+          log.error('DB failed on /api/devices', err.cause ?? err);
+          return res.status(500).json({ error: err.message });
+        }
+
+        if (err.source === 'portal') {
+          log.error('Portal API failed on /api/devices', err.cause ?? err);
+          return res.status(502).json({ error: err.message });
+        }
+      }
+
+      log.error('Devices failed', err);
+      return res.status(500).json({ error: 'Devices failed' });
     }
   });
 
@@ -277,10 +277,7 @@ export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
      *       401:
      *         description: User not authenticated
      */
-    return res.json({
-      deviceId: req.params.deviceId,
-      telemetry: deps.telemetryStream.getData(req.params.deviceId),
-    });
+    return res.json(deps.getDeviceTelemetry.execute(req.params.deviceId));
   });
 
   router.get('/robots', requireLogin, async (req, res) => {
@@ -322,17 +319,13 @@ export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
      *       500:
      *         description: Database error
      */
-    const userEmail = req.session.user!.email!;
-
-    let robots: RobotReadModel[];
     try {
-      robots = await deps.listRobotsForUser.execute(userEmail);
+      const robots = await deps.listRobotsForUser.execute(req.session.user!._id);
+      return res.json(robots);
     } catch (err) {
       log.error('DB failed on /api/robots', err);
       return res.status(500).json({ error: 'Devices failed' });
     }
-
-    return res.json(robots);
   });
 
   router.patch('/robots/:robotId/rename', requireLogin, async (req, res) => {
@@ -388,27 +381,15 @@ export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
      *       401:
      *         description: User not authenticated
      */
-    const userEmail = req.session.user!.email!;
     const isAdmin = req.session.user!.admin;
     const robotId = req.params.robotId;
-
     const { name } = req.body || {};
 
-    if (typeof name !== 'string' || !name.trim()) {
-      return res.status(400).json({ error: 'name is required' });
-    }
-
     try {
-      const robots = await deps.listRobotsForUser.execute(userEmail);
-
-      const hasAccess = isAdmin || robots.some((robot) => robot.id === robotId);
-
-      if (!hasAccess) {
-        return res.status(403).json({ error: 'Robot not found' });
-      }
-
-      const result = await deps.updateRobotName.execute({
-        id: robotId,
+      const result = await deps.renameAccessibleRobot.execute({
+        robotId,
+        userId: req.session.user!._id,
+        isAdmin,
         name,
       });
 
@@ -420,6 +401,10 @@ export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
     } catch (err) {
       if (err instanceof RobotValidationError) {
         return res.status(400).json({ error: err.message });
+      }
+
+      if (err instanceof RobotAccessDeniedError) {
+        return res.status(403).json({ error: err.message });
       }
 
       log.error('Update robot name failed', err);
@@ -489,42 +474,32 @@ export function createApiRouter(config: ApiRouterConfig, deps: ApiRouterDeps) {
      *       401:
      *         description: User not authenticated
      */
-    const userEmail = req.session.user!.email!;
     const isAdmin = req.session.user!.admin;
     const deviceId = req.params.deviceId;
     const { topic, message } = req.body || {};
 
-    // Validate input
-    if (!topic || typeof topic !== 'string') {
-      return res.status(400).json({ error: 'topic is required and must be a string' });
-    }
-
-    if (!message || typeof message !== 'object') {
-      return res.status(400).json({ error: 'message is required and must be an object' });
-    }
-
     try {
-      // Check if user has access to this device
-      const robots = await deps.listRobotsForUser.execute(userEmail);
-      const hasAccess = isAdmin || robots.some((robot) => robot.id === deviceId);
-
-      if (!hasAccess) {
-        return res.status(403).json({ error: 'Device not found' });
-      }
-
-      // Initialize command publisher for this device
-      await deps.commandPublisher.initialize(deviceId);
-
-      // Publish the command
-      await deps.commandPublisher.publish(deviceId, topic, message);
-
-      return res.json({
-        ok: true,
+      const result = await deps.publishDeviceCommand.execute({
         deviceId,
+        userId: req.session.user!._id,
+        isAdmin,
         topic,
         message,
       });
+
+      return res.json({
+        ok: true,
+        ...result,
+      });
     } catch (err) {
+      if (err instanceof DeviceValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      if (err instanceof DeviceAccessDeniedError) {
+        return res.status(403).json({ error: err.message });
+      }
+
       log.error(`Failed to publish command for device ${deviceId}:`, err);
       const errorMessage = (err as any).message || 'Failed to publish command';
       return res.status(400).json({ error: errorMessage });

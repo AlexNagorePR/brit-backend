@@ -24,8 +24,8 @@ export function createDbRobotRepository(db: RobotDb): RobotRepository {
       return db.getAllRobots();
     },
 
-    listForUser(userEmail: string): Promise<RobotReadModel[]> {
-      return db.getRobotIdsForUser(userEmail);
+    listForUser(userId: string): Promise<RobotReadModel[]> {
+      return db.getRobotIdsForUser(userId);
     },
 
     findById(robotId: string): Promise<RobotDetailsReadModel | null> {
@@ -55,8 +55,8 @@ export function createDbRobotRepository(db: RobotDb): RobotRepository {
       return db.getUsersForRobot(robotId);
     },
 
-    setUsers(robotId: string, userEmails: string[]): Promise<void> {
-      return db.setUsersForRobot(robotId, userEmails);
+    setUsers(robotId: string, userIds: string[]): Promise<void> {
+      return db.setUsersForRobot(robotId, userIds);
     },
   };
 }

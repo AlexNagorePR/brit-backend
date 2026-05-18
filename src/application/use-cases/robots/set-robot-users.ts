@@ -19,10 +19,14 @@ export class SetRobotUsers {
       throw new RobotValidationError('userIds must be an array');
     }
 
+    if (!command.userIds.every((userId: unknown): userId is string => typeof userId === 'string')) {
+      throw new RobotValidationError('userIds must be an array of strings');
+    }
+
     const userIds = [...new Set(
       command.userIds
-        .filter((userId: unknown): userId is string => typeof userId === 'string' && userId.trim().length > 0)
-        .map(userId => userId.trim().toLowerCase())
+        .map(userId => userId.trim())
+        .filter(Boolean)
     )];
 
     await this.robotRepository.setUsers(command.robotId, userIds);

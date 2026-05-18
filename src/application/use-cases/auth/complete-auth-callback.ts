@@ -70,7 +70,7 @@ export class CompleteAuthCallback {
       };
     }
 
-    const userId = identity.email || identity.subject;
+    const userId = getStringClaim(identity.claims, 'cognito:username') || identity.subject || identity.email || '';
 
     return {
       kind: 'authenticated',
@@ -96,4 +96,9 @@ export class CompleteAuthCallback {
 
     return typeof value === 'number' ? value : Date.now();
   }
+}
+
+function getStringClaim(claims: Record<string, unknown>, key: string): string | undefined {
+  const value = claims[key];
+  return typeof value === 'string' ? value : undefined;
 }

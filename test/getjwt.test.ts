@@ -15,7 +15,7 @@ vi.mock('@/server/auth.js', () => ({
   },
 }));
 
-import { createApp } from '@/server/app.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
 
 describe('JWT', () => {
   it('POST /api/getJWT rejects *_robot-agent', async () => {

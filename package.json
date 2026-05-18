@@ -7,7 +7,9 @@
     "dev": "NODE_OPTIONS=--no-network-family-autoselection nodemon -w src/server -x tsx src/server/main.ts",
     "start": "NODE_ENV=production NODE_OPTIONS=--no-network-family-autoselection tsx src/server/main.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1007.0",

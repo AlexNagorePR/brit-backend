@@ -7,12 +7,8 @@ import fs from 'node:fs';
 import swaggerUi from 'swagger-ui-express';
 import cors from 'cors';
 
-import utils from '@transitive-sdk/utils';
-import { loadConfig } from '@/server/config.js';
-import {
-  createAppComposition,
-  type CompositionDeps,
-} from '@/server/composition.js';
+import type { AppComposition } from '@/server/composition.js';
+import type { AppConfig } from '@/server/config.js';
 import { specs } from '@/server/swagger.js';
 import { createAuthRouter } from '@/server/routes/auth.js';
 import { createApiRouter } from '@/server/routes/api.js';
@@ -21,13 +17,14 @@ import { createAdminRobotsRouter } from '@/server/routes/admin/robots.js';
 import { createAdminClientsRouter } from '@/server/routes/admin/clients.js';
 import { createAdminBatteriesRouter } from '@/server/routes/admin/batteries.js';
 
-const log = utils.getLogger('app');
 const FileStore = FileStoreFactory(session);
 
-export function createApp(deps: CompositionDeps = {}) {
-  const config = loadConfig();
-  const composition = createAppComposition(config, deps);
+export type CreateAppOptions = {
+  config: AppConfig;
+  composition: AppComposition;
+};
 
+export function createApp({ config, composition }: CreateAppOptions) {
   const app = express();
   app.use(express.json());
 
@@ -50,8 +47,6 @@ export function createApp(deps: CompositionDeps = {}) {
     path: sessionsDir,
     retries: 0,
   });
-
-  composition.collector.start().catch(err => log.error('Collector failed to start', err));
 
   app.use(
     session({

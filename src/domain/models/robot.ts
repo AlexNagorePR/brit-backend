@@ -15,7 +15,7 @@ export class Robot {
   private worksPerformed?: number;
   private timeInOperation?: number;
   private timeWorking?: number;
-  private userEmails: string[];
+  private userIds: string[];
   private createdAt: Date;
 
   constructor(
@@ -30,7 +30,7 @@ export class Robot {
     worksPerformed?: number,
     timeInOperation?: number,
     timeWorking?: number,
-    userEmails: string[] = [],
+    userIds: string[] = [],
     createdAt: Date = new Date(),
   ) {
     this.id = id;
@@ -44,7 +44,7 @@ export class Robot {
     this.worksPerformed = worksPerformed;
     this.timeInOperation = timeInOperation;
     this.timeWorking = timeWorking;
-    this.userEmails = Robot.normalizeUserEmails(userEmails ?? []);
+    this.userIds = Robot.normalizeUserIds(userIds ?? []);
     this.createdAt = new Date(createdAt);
   }
 
@@ -53,7 +53,7 @@ export class Robot {
     hostName: string,
     robotName: string,
     clientId?: string,
-    userEmails: string[] = [],
+    userIds: string[] = [],
     deliveryDate?: string,
     lastMaintenanceDate?: string,
     lastCleanDate?: string,
@@ -81,7 +81,7 @@ export class Robot {
       worksPerformed,
       timeInOperation,
       timeWorking,
-      userEmails
+      userIds
     );
   }
 
@@ -100,7 +100,7 @@ export class Robot {
     worksPerformed?: number,
     timeInOperation?: number,
     timeWorking?: number,
-    userEmails: string[] = [],
+    userIds: string[] = [],
     createdAt?: Date
   ): Robot {
     return new Robot(
@@ -115,17 +115,17 @@ export class Robot {
       worksPerformed,
       timeInOperation,
       timeWorking,
-      userEmails,
+      userIds,
       createdAt
     );
   }
 
-  private static normalizeUserEmails(userEmails: string[]): string[] {
-    const normalizedEmails = userEmails
-      .map((email) => email.trim().toLowerCase())
-      .filter((email) => Boolean(email));
+  private static normalizeUserIds(userIds: string[]): string[] {
+    const normalizedIds = userIds
+      .map((userId) => userId.trim())
+      .filter((userId) => Boolean(userId));
 
-    return [...new Set(normalizedEmails)];
+    return [...new Set(normalizedIds)];
   }
 
   getId(): string {
@@ -144,8 +144,8 @@ export class Robot {
     return this.robotName;
   }
 
-  getUserEmails(): string[] {
-    return [...this.userEmails];
+  getUserIds(): string[] {
+    return [...this.userIds];
   }
 
   getCreatedAt(): Date {
@@ -187,21 +187,21 @@ export class Robot {
     this.robotName = newName.trim();
   }
 
-  addUserEmail(email: string): void {
-    if (!email || !email.trim()) {
-      throw new Error('Email is required');
+  addUserId(userId: string): void {
+    if (!userId || !userId.trim()) {
+      throw new Error('User id is required');
     }
-    const trimmedEmail = email.trim().toLowerCase();
-    if (!this.userEmails.includes(trimmedEmail)) {
-      this.userEmails.push(trimmedEmail);
+    const trimmedUserId = userId.trim();
+    if (!this.userIds.includes(trimmedUserId)) {
+      this.userIds.push(trimmedUserId);
     }
   }
 
-  removeUserEmail(email: string): void {
-    const trimmedEmail = email.trim().toLowerCase();
-    const index = this.userEmails.indexOf(trimmedEmail);
+  removeUserId(userId: string): void {
+    const trimmedUserId = userId.trim();
+    const index = this.userIds.indexOf(trimmedUserId);
     if (index > -1) {
-      this.userEmails.splice(index, 1);
+      this.userIds.splice(index, 1);
     }
   }
 
@@ -218,7 +218,7 @@ export class Robot {
       worksPerformed: this.worksPerformed,
       timeInOperation: this.timeInOperation,
       timeWorking: this.timeWorking,
-      userEmails: [...this.userEmails],
+      userIds: [...this.userIds],
       createdAt: this.createdAt.toISOString(),
     };
   }

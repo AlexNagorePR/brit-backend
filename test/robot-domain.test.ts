@@ -3,13 +3,13 @@ import { Robot } from '@/domain/models/robot.js';
 
 describe('Robot', () => {
   it('should create a new robot with valid data', () => {
-    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', 'client-1', ['user@example.com']);
+    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', 'client-1', ['user-1']);
 
     expect(robot.getId()).toBe('robot-1');
     expect(robot.getClientId()).toBe('client-1');
     expect(robot.getHostName()).toBe('robot.local');
     expect(robot.getRobotName()).toBe('Robot A');
-    expect(robot.getUserEmails()).toEqual(['user@example.com']);
+    expect(robot.getUserIds()).toEqual(['user-1']);
   });
 
   it('should trim host name and robot name', () => {
@@ -34,49 +34,49 @@ describe('Robot', () => {
     expect(robot.getRobotName()).toBe('Robot B');
   });
 
-  it('should add user email', () => {
+  it('should add user id', () => {
     const robot = Robot.create('robot-1', 'robot.local', 'Robot A');
-    robot.addUserEmail('user@example.com');
+    robot.addUserId('user-1');
 
-    expect(robot.getUserEmails()).toContain('user@example.com');
+    expect(robot.getUserIds()).toContain('user-1');
   });
 
-  it('should not add duplicate emails', () => {
-    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', undefined, ['user@example.com']);
-    robot.addUserEmail('user@example.com');
+  it('should not add duplicate user ids', () => {
+    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', undefined, ['user-1']);
+    robot.addUserId('user-1');
 
-    expect(robot.getUserEmails().length).toBe(1);
+    expect(robot.getUserIds().length).toBe(1);
   });
 
-  it('should normalize initial user emails', () => {
-    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', undefined, [' User@EXAMPLE.COM ', 'user@example.com']);
+  it('should normalize initial user ids without changing case', () => {
+    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', undefined, [' User-1 ', 'User-1', 'user-1']);
 
-    expect(robot.getUserEmails()).toEqual(['user@example.com']);
+    expect(robot.getUserIds()).toEqual(['User-1', 'user-1']);
   });
 
-  it('should remove user email', () => {
-    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', undefined, ['user1@example.com', 'user2@example.com']);
-    robot.removeUserEmail('user1@example.com');
+  it('should remove user id', () => {
+    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', undefined, ['user-1', 'user-2']);
+    robot.removeUserId('user-1');
 
-    expect(robot.getUserEmails()).toEqual(['user2@example.com']);
+    expect(robot.getUserIds()).toEqual(['user-2']);
   });
 
-  it('should lowercase emails', () => {
+  it('should trim user ids', () => {
     const robot = Robot.create('robot-1', 'robot.local', 'Robot A');
-    robot.addUserEmail('User@EXAMPLE.COM');
+    robot.addUserId(' user-1 ');
 
-    expect(robot.getUserEmails()).toContain('user@example.com');
+    expect(robot.getUserIds()).toContain('user-1');
   });
 
   it('should serialize to JSON', () => {
-    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', 'client-1', ['user@example.com']);
+    const robot = Robot.create('robot-1', 'robot.local', 'Robot A', 'client-1', ['user-1']);
     const json = robot.toJSON();
 
     expect(json).toHaveProperty('id', 'robot-1');
     expect(json).toHaveProperty('clientId', 'client-1');
     expect(json).toHaveProperty('hostName', 'robot.local');
     expect(json).toHaveProperty('robotName', 'Robot A');
-    expect(json).toHaveProperty('userEmails', ['user@example.com']);
+    expect(json).toHaveProperty('userIds', ['user-1']);
   });
 
   it('should reconstruct from database', () => {
@@ -93,7 +93,7 @@ describe('Robot', () => {
       undefined,
       undefined,
       undefined,
-      ['user@example.com'],
+      ['user-1'],
       createdAt
     );
 

@@ -3,7 +3,8 @@ import type {
   PortalRobotInfoResponse,
   PortalRunningRobotDetails,
 } from '@/application/ports/portal-api.js';
-import { fetchPortalApi, signPortalApiJWT } from '@/server/portal.js';
+import { fetchPortalApi } from '@/infrastructure/portal/portal-http-client.js';
+import { signPortalApiJWT } from '@/infrastructure/portal/portal-token.js';
 
 const ROBOT_AGENT_API =
   'https://portal.transitiverobotics.com/@transitive-robotics/_robot-agent/api/v1';

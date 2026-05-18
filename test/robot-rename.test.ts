@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '@/server/app.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
 
 const mockDb = vi.hoisted(() => ({
   getRobotIdsForUser: vi.fn(),
@@ -47,6 +47,7 @@ describe('Robot name', () => {
       .expect(200);
 
     expect(mockDb.updateRobotName).toHaveBeenCalledWith('r1', 'Robot almacén');
+    expect(mockDb.getRobotIdsForUser).toHaveBeenCalledWith('u1');
     expect(res.body).toEqual({
       ok: true,
       robotId: 'r1',
@@ -69,6 +70,7 @@ describe('Robot name', () => {
       .expect(403);
 
     expect(res.body).toEqual({ error: 'Robot not found' });
+    expect(mockDb.getRobotIdsForUser).toHaveBeenCalledWith('u1');
     expect(mockDb.updateRobotName).not.toHaveBeenCalled();
   });
 

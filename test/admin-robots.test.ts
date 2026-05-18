@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '@/server/app.js';
+import { createTestApp as createApp } from './helpers/create-test-app.js';
 
 const mockDb = vi.hoisted(() => ({
   getAllRobots: vi.fn(),
@@ -48,7 +48,7 @@ describe('Admin robots', () => {
         clientId: null,
         hostName: 'host-1',
         robotName: 'Robot One',
-        userEmails: [],
+        userIds: [],
       },
     ];
 
@@ -67,7 +67,7 @@ describe('Admin robots', () => {
   });
 
   it('GET /admin/robots/:robotId/users returns robot users', async () => {
-    const userIds = ['one@example.com', 'two@example.com'];
+    const userIds = ['user-1', 'user-2'];
 
     (mockDb.getUsersForRobot as any).mockResolvedValue(userIds);
 
@@ -96,18 +96,18 @@ describe('Admin robots', () => {
     const res = await request(app)
       .put('/admin/robots/robot-1/users')
       .send({
-        userIds: [' ONE@EXAMPLE.COM ', 'one@example.com', '', 'two@example.com'],
+        userIds: [' user-1 ', 'user-1', '', 'User-2'],
       })
       .expect(200);
 
     expect(res.body).toEqual({
       ok: true,
       robotId: 'robot-1',
-      userIds: ['one@example.com', 'two@example.com'],
+      userIds: ['user-1', 'User-2'],
     });
     expect(mockDb.setUsersForRobot).toHaveBeenCalledWith('robot-1', [
-      'one@example.com',
-      'two@example.com',
+      'user-1',
+      'User-2',
     ]);
   });
 
@@ -118,7 +118,7 @@ describe('Admin robots', () => {
 
     const res = await request(app)
       .put('/admin/robots/robot-1/users')
-      .send({ userIds: 'one@example.com' })
+      .send({ userIds: 'user-1' })
       .expect(400);
 
     expect(res.body.error).toBe('userIds must be an array');

@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import { RobotInfo, WorkInfo, InterruptionInfo, WarningInfo, CleanInfo } from './types.js';
 import { Robot } from '@/domain/models/robot.js';
 
-function toRobotInfo(robot: Robot, options: { includeUserEmails?: boolean } = {}): RobotInfo {
+function toRobotInfo(robot: Robot, options: { includeUserIds?: boolean } = {}): RobotInfo {
   const info: RobotInfo = {
     id: robot.getId(),
     clientId: robot.getClientId() ?? null,
@@ -10,14 +10,14 @@ function toRobotInfo(robot: Robot, options: { includeUserEmails?: boolean } = {}
     robotName: robot.getRobotName(),
   };
 
-  if (options.includeUserEmails) {
-    info.userEmails = robot.getUserEmails();
+  if (options.includeUserIds) {
+    info.userIds = robot.getUserIds();
   }
 
   return info;
 }
 
-function reconstructRobot(row: any, userEmails: string[] = []): Robot {
+function reconstructRobot(row: any, userIds: string[] = []): Robot {
   return Robot.reconstruct(
     row.id,
     row.host_name,
@@ -30,37 +30,19 @@ function reconstructRobot(row: any, userEmails: string[] = []): Robot {
     undefined,
     undefined,
     undefined,
-    userEmails
-  );
-}
-
-function reconstructRobotUsers(robotId: string, userEmails: string[]): Robot {
-  return Robot.reconstruct(
-    robotId,
-    '',
-    '',
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    userEmails
+    userIds
   );
 }
 
 export function createRobotOps(pool: Pool) {
   return {
-    async getRobotIdsForUser(email: string) {
+    async getRobotIdsForUser(userId: string) {
       const { rows } = await pool.query(
         `SELECT r.id, r.host_name, r.robot_name, r.client_id
          FROM user_robot ur
          JOIN robot r ON r.id = ur.robot_id
-         JOIN "user" u ON u.id = ur.user_id
-         WHERE u.email = $1`,
-        [email]
+         WHERE ur.user_id = $1`,
+        [userId]
       );
 
       return rows.map(r => toRobotInfo(reconstructRobot(r)));
@@ -69,7 +51,7 @@ export function createRobotOps(pool: Pool) {
     async getAllRobots() {
       const { rows } = await pool.query(
         `SELECT r.id, r.host_name, r.robot_name, r.client_id, c.name as client_name,
-                COALESCE(array_agg(DISTINCT u.email ORDER BY u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) as user_emails
+                COALESCE(array_agg(DISTINCT u.id::text ORDER BY u.id::text) FILTER (WHERE u.id IS NOT NULL), ARRAY[]::text[]) as user_ids
          FROM robot r
          LEFT JOIN user_robot ur ON r.id = ur.robot_id
          LEFT JOIN "user" u ON ur.user_id = u.id
@@ -80,8 +62,8 @@ export function createRobotOps(pool: Pool) {
 
       return rows.map(r => ({
         ...toRobotInfo(
-          reconstructRobot(r, r.user_emails),
-          { includeUserEmails: true }
+          reconstructRobot(r, r.user_ids),
+          { includeUserIds: true }
         ),
         clientName: r.client_name,
       }));
@@ -90,7 +72,7 @@ export function createRobotOps(pool: Pool) {
     async getRobotById(robotId: string) {
       const { rows } = await pool.query(
         `SELECT r.id, r.client_id, r.host_name, r.robot_name, c.name as client_name,
-                COALESCE(array_agg(DISTINCT u.email ORDER BY u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) as user_emails
+                COALESCE(array_agg(DISTINCT u.id::text ORDER BY u.id::text) FILTER (WHERE u.id IS NOT NULL), ARRAY[]::text[]) as user_ids
          FROM robot r
          LEFT JOIN user_robot ur ON r.id = ur.robot_id
          LEFT JOIN "user" u ON ur.user_id = u.id
@@ -134,8 +116,8 @@ export function createRobotOps(pool: Pool) {
 
       const workIds = worksRes.rows.map((w: any) => w.id);
 
-      let interruptionsByWork: Record<string, InterruptionInfo[]> = {};
-      let warningsByWork: Record<string, WarningInfo[]> = {};
+      const interruptionsByWork: Record<string, InterruptionInfo[]> = {};
+      const warningsByWork: Record<string, WarningInfo[]> = {};
 
       if (workIds.length > 0) {
         const interruptionsRes = await pool.query(
@@ -191,10 +173,10 @@ export function createRobotOps(pool: Pool) {
         event: c.event,
       }));
 
-      const robot = reconstructRobot(r, r.user_emails);
+      const robot = reconstructRobot(r, r.user_ids);
 
       return {
-        ...toRobotInfo(robot, { includeUserEmails: true }),
+        ...toRobotInfo(robot, { includeUserIds: true }),
         clientName: r.client_name,
         works: worksWithDetails,
         cleans,
@@ -267,7 +249,7 @@ export function createRobotOps(pool: Pool) {
           robot.hostName,
           robot.robotName,
           robot.clientId ?? undefined,
-          robot.userEmails ?? []
+          robot.userIds ?? []
         ));
 
         console.log(`Starting sync with ${domainRobots.length} robots:`, domainRobots.map(r => ({ id: r.getId(), hostName: r.getHostName() })));
@@ -314,21 +296,18 @@ export function createRobotOps(pool: Pool) {
 
     async getUsersForRobot(robotId: string) {
       const { rows } = await pool.query(
-        `SELECT u.email
+        `SELECT u.id::text as id
         FROM user_robot ur
         JOIN "user" u ON ur.user_id = u.id
         WHERE ur.robot_id = $1
-        ORDER BY u.email ASC`,
+        ORDER BY u.id ASC`,
         [robotId]
       );
 
-      const robot = reconstructRobotUsers(robotId, rows.map(r => r.email));
-      return robot.getUserEmails();
+      return rows.map(r => r.id);
     },
 
-    async setUsersForRobot(robotId: string, userEmails: string[]) {
-      const robot = reconstructRobotUsers(robotId, userEmails);
-      const normalizedUserEmails = robot.getUserEmails();
+    async setUsersForRobot(robotId: string, userIds: string[]) {
       const client = await pool.connect();
 
       try {
@@ -340,14 +319,12 @@ export function createRobotOps(pool: Pool) {
           [robotId]
         );
 
-        for (const email of normalizedUserEmails) {
+        for (const userId of userIds) {
           await client.query(
             `INSERT INTO user_robot (user_id, robot_id)
-            SELECT id, $2
-            FROM "user"
-            WHERE email = $1
+            VALUES ($1, $2)
             ON CONFLICT (user_id, robot_id) DO NOTHING`,
-            [email, robotId]
+            [userId, robotId]
           );
         }
 

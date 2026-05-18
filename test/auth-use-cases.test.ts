@@ -77,11 +77,45 @@ describe('auth use cases', () => {
       kind: 'authenticated',
       state: 'state-1',
       account: {
-        _id: 'user@example.com',
+        _id: 'subject-1',
         email: 'user@example.com',
         admin: true,
         verified: true,
         created: new Date(2_000),
+      },
+    });
+  });
+
+  it('uses cognito username as account id when present', async () => {
+    const provider = createAuthenticationProvider({
+      completeCallback: vi.fn(async () => ({
+        subject: 'subject-1',
+        email: 'user@example.com',
+        groups: ['allowed'],
+        claims: {
+          'cognito:username': 'user-1',
+        },
+      })),
+    });
+    const useCase = new CompleteAuthCallback(provider, {
+      redirectUri: 'http://localhost/auth/callback',
+    });
+
+    const result = await useCase.execute({
+      params: { state: 'state-1' },
+      pending: {
+        state: 'state-1',
+        nonce: 'nonce-1',
+        createdAt: 1_000,
+      },
+      now: 2_000,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      account: {
+        _id: 'user-1',
+        email: 'user@example.com',
       },
     });
   });

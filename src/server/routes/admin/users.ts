@@ -1,31 +1,31 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
 import { ClientNotFoundError } from '@/application/use-cases/clients/errors.js';
-import type { FindClientById } from '@/application/use-cases/clients/find-client-by-id.js';
-import type { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
-import type { CreateUser } from '@/application/use-cases/users/create-user.js';
-import type { DeleteUser } from '@/application/use-cases/users/delete-user.js';
-import { UserNotFoundError } from '@/application/use-cases/users/errors.js';
-import type { FindUserById } from '@/application/use-cases/users/find-user-by-id.js';
+import type { CreateIdentityUserAndLocalUser } from '@/application/use-cases/users/create-identity-user-and-local-user.js';
+import type { DeleteIdentityUserAndLocalUser } from '@/application/use-cases/users/delete-identity-user-and-local-user.js';
+import { UserNotFoundError, UserValidationError } from '@/application/use-cases/users/errors.js';
+import type { GetIdentityUser } from '@/application/use-cases/users/get-identity-user.js';
 import type { ListUsers } from '@/application/use-cases/users/list-users.js';
-import type { ListUsersByClient } from '@/application/use-cases/users/list-users-by-client.js';
-import type { SyncIdentityUsers } from '@/application/use-cases/users/sync-identity-users.js';
+import type { ListUsersForClientByName } from '@/application/use-cases/users/list-users-for-client-by-name.js';
+import type { ListUsersWithIdentitySync } from '@/application/use-cases/users/list-users-with-identity-sync.js';
+import type { SetIdentityUserEnabled } from '@/application/use-cases/users/set-identity-user-enabled.js';
+import type { SyncIdentityUsersFromProvider } from '@/application/use-cases/users/sync-identity-users-from-provider.js';
+import type { UpdateIdentityUserGroups } from '@/application/use-cases/users/update-identity-user-groups.js';
 import type { UpdateUserClient } from '@/application/use-cases/users/update-user-client.js';
-import type { UserIdentityProvider } from '@/application/ports/user-identity-provider.js';
 import { requireAdmin } from '@/server/auth.js';
 
 const log = utils.getLogger('routes/admin/users');
 
 export type AdminUsersRouterDeps = {
-  userIdentityProvider: UserIdentityProvider;
-  findClientById: FindClientById;
-  findClientByName: FindClientByName;
-  createUser: CreateUser;
-  deleteUser: DeleteUser;
-  findUserById: FindUserById;
+  createIdentityUserAndLocalUser: CreateIdentityUserAndLocalUser;
+  deleteIdentityUserAndLocalUser: DeleteIdentityUserAndLocalUser;
+  getIdentityUser: GetIdentityUser;
   listUsers: ListUsers;
-  listUsersByClient: ListUsersByClient;
-  syncIdentityUsers: SyncIdentityUsers;
+  listUsersForClientByName: ListUsersForClientByName;
+  listUsersWithIdentitySync: ListUsersWithIdentitySync;
+  setIdentityUserEnabled: SetIdentityUserEnabled;
+  syncIdentityUsersFromProvider: SyncIdentityUsersFromProvider;
+  updateIdentityUserGroups: UpdateIdentityUserGroups;
   updateUserClient: UpdateUserClient;
 };
 
@@ -85,38 +85,8 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      *         description: Error fetching users from the identity provider
      */
     try {
-      log.info('Fetching identity users...');
-      const identityUsers = await deps.userIdentityProvider.listUsers();
-      log.info(`Fetched ${identityUsers.length} users from identity provider`);
-
-      const usersToSync = identityUsers
-        .filter((u: any) => u.username && u.attributes?.email)
-        .map((u: any) => ({ username: u.username, email: u.attributes.email }));
-
-      log.info(`Syncing ${usersToSync.length} users to database`, { users: usersToSync });
-
-      try {
-        await deps.syncIdentityUsers.execute(usersToSync);
-        log.info('Users synced to database successfully');
-      } catch (syncErr) {
-        log.error('Failed to sync users to database', { error: syncErr });
-        // Don't fail the response, still return identity users even if sync fails.
-      }
-
-      // Also get users from DB to return enriched data
-      let dbUsers: any[] = [];
-      try {
-        dbUsers = await deps.listUsers.execute();
-        log.info(`Fetched ${dbUsers.length} users from database`, { users: dbUsers });
-      } catch (dbErr) {
-        log.error('Failed to fetch users from database', { error: dbErr });
-      }
-
-      return res.json({
-        identityUsers,
-        dbUsers,
-        synced: true,
-      });
+      const result = await deps.listUsersWithIdentitySync.execute();
+      return res.json(result);
     } catch (err) {
       log.error('Get users failed', { error: err });
       return res.status(502).json({ error: 'List users failed' });
@@ -144,21 +114,7 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      */
     log.info('Manual sync request for users');
     try {
-      log.info('Fetching all identity users...');
-      const identityUsers = await deps.userIdentityProvider.listUsers();
-      log.info(`Fetched ${identityUsers.length} users from identity provider`, {
-        users: identityUsers.map((u: any) => ({ username: u.username, email: u.attributes?.email })),
-      });
-
-      const usersToSync = identityUsers
-        .filter((u: any) => u.username && u.attributes?.email)
-        .map((u: any) => ({ username: u.username, email: u.attributes.email }));
-
-      log.info(`Extracted ${usersToSync.length} users from identity provider`, { users: usersToSync });
-
-      log.info(`Syncing to database`);
-      const result = await deps.syncIdentityUsers.execute(usersToSync);
-      log.info('Sync completed successfully');
+      const result = await deps.syncIdentityUsersFromProvider.execute();
 
       return res.json({
         ok: true,
@@ -216,43 +172,24 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      */
     const { email, groups, temporaryPassword, givenName, familyName, clientId } = req.body || {};
 
-    console.log('Create user request', { email, groups, givenName, familyName, clientId });
     log.info('Create user request', { email, groups, givenName, familyName, clientId });
 
-    if (!email) {
-      log.warn('Create user failed: email is required');
-      return res.status(400).json({
-        error: 'email is required',
-      });
-    }
-
-    if (groups && !Array.isArray(groups)) {
-      log.warn('Create user failed: groups must be array', { groups });
-      return res.status(400).json({
-        error: 'groups must be an array of strings',
-      });
-    }
-
     try {
-      log.info('Creating user in identity provider', { email });
-      const user = await deps.userIdentityProvider.createUser({
+      const user = await deps.createIdentityUserAndLocalUser.execute({
         email,
         temporaryPassword,
         givenName,
         familyName,
         groups,
-      });
-      log.info('User created in identity provider successfully', { email });
-
-      await deps.createUser.execute({
-        id: user.username,
-        email,
         clientId,
       });
-      log.info('User created in database successfully', { email, clientId });
 
       return res.status(201).json(user);
     } catch (err) {
+      if (err instanceof UserValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+
       log.error('Create user failed', { email, error: err, stack: err instanceof Error ? err.stack : undefined });
       return res.status(502).json({ error: 'Create user failed' });
     }
@@ -321,12 +258,12 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      *         description: Identity provider operation failed
      */
     try {
-      const user = await deps.userIdentityProvider.getUser(req.params.username);
+      const user = await deps.getIdentityUser.execute(req.params.username);
       return res.json(user);
-    } catch (err: any) {
+    } catch (err) {
       log.error('Identity provider get user failed', err);
 
-      if (err?.name === 'UserNotFoundException') {
+      if (err instanceof UserNotFoundError) {
         return res.status(404).json({ error: 'User not found' });
       }
 
@@ -375,50 +312,14 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
     const username = req.params.username;
     const { groups } = req.body || {};
 
-    if (!Array.isArray(groups)) {
-      return res.status(400).json({
-        error: 'group must be an array',
-      });
-    }
-
-    const normalizedGroups = groups.filter(
-      (g: unknown): g is string => typeof g === 'string' && g.trim().length > 0
-    );
-
-    const allowedGroups = new Set(['allowed', 'admin']);
-
-    const invalidGroups = normalizedGroups.filter((g) => !allowedGroups.has(g));
-    if (invalidGroups.length > 0) {
-      return res.status(400).json({
-        error: `Invalid groups: ${invalidGroups.join(', ')}`,
-      });
-    }
-
     try {
-      const user = await deps.userIdentityProvider.getUser(username);
-      const currentGroups = user.groups || [];
-
-      const groupsToAdd = normalizedGroups.filter((g) => !currentGroups.includes(g));
-      const groupsToRemove = currentGroups.filter((g: string) => !normalizedGroups.includes(g));
-
-      if (groupsToAdd.length > 0) {
-        await deps.userIdentityProvider.addUserToGroups(username, groupsToAdd);
-      }
-
-      if (groupsToRemove.length > 0) {
-        await deps.userIdentityProvider.removeUserFromGroups(username, groupsToRemove);
-      }
-
-      const updatedUser = await deps.userIdentityProvider.getUser(username);
-      const dbUser = await deps.findUserById.execute(username);
-      const client = dbUser?.clientId ? await deps.findClientById.execute(dbUser.clientId) : null;
-
-      return res.json({
-        ...updatedUser,
-        clientId: dbUser?.clientId || null,
-        clientName: client?.name || null,
-      });
+      const result = await deps.updateIdentityUserGroups.execute({ username, groups });
+      return res.json(result);
     } catch (err) {
+      if (err instanceof UserValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+
       log.error('Set user groups failed', err);
       return res.status(502).json({ error: 'Set user groups failed' });
     }
@@ -452,12 +353,16 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      *         description: Identity provider operation failed
      */
     try {
-      await deps.userIdentityProvider.disableUser(req.params.username);
-      return res.json({ ok: true, username: req.params.username, enabled: false });
-    } catch (err: any) {
+      const result = await deps.setIdentityUserEnabled.execute({
+        username: req.params.username,
+        enabled: false,
+      });
+
+      return res.json(result);
+    } catch (err) {
       log.error('Identity provider disable user failed', err);
 
-      if (err?.name === 'UserNotFoundException') {
+      if (err instanceof UserNotFoundError) {
         return res.status(404).json({ error: 'User not found' });
       }
 
@@ -493,12 +398,16 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      *         description: Identity provider operation failed
      */
     try {
-      await deps.userIdentityProvider.enableUser(req.params.username);
-      return res.json({ ok: true, username: req.params.username, enabled: true });
-    } catch (err: any) {
+      const result = await deps.setIdentityUserEnabled.execute({
+        username: req.params.username,
+        enabled: true,
+      });
+
+      return res.json(result);
+    } catch (err) {
       log.error('Identity provider enable user failed', err);
 
-      if (err?.name === 'UserNotFoundException') {
+      if (err instanceof UserNotFoundError) {
         return res.status(404).json({ error: 'User not found' });
       }
 
@@ -546,9 +455,8 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      *         description: Update failed
      */
     const username = req.params.username;
-    const { clientId } = req.body || "VACIO";
+    const { clientId } = req.body || {};
 
-    console.log('Patch user client request', { username, clientId });
     log.info('Patch user client request', { username, clientId });
 
     if (clientId !== null && clientId !== undefined && typeof clientId !== 'string') {
@@ -608,19 +516,18 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
      */
     const username = req.params.username;
 
-    if (req.session.user?.email === username) {
-      return res.status(400).json({
-        error: 'cannot_delete_self'
-      });
-    }
-
     try {
-      await deps.userIdentityProvider.deleteUser(username);
-
-      await deps.deleteUser.execute(username);
+      await deps.deleteIdentityUserAndLocalUser.execute({
+        username,
+        currentUserId: req.session.user?._id,
+      });
 
       return res.json({ ok: true, username });
     } catch (err) {
+      if (err instanceof UserValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+
       log.error('Delete user failed', err);
       return res.status(502).json({ error: 'Delete user failed' })
     }
@@ -656,15 +563,8 @@ export function createAdminUsersRouter(deps: AdminUsersRouterDeps) {
     const clientName = req.params.clientName;
 
     try {
-      const client = await deps.findClientByName.execute(clientName);
-
-      const users = await deps.listUsersByClient.execute(client.id);
-
-      return res.json({
-        clientId: client.id,
-        clientName: client.name,
-        users,
-      });
+      const result = await deps.listUsersForClientByName.execute(clientName);
+      return res.json(result);
     } catch (err) {
       if (err instanceof ClientNotFoundError) {
         return res.status(404).json({ error: err.message });

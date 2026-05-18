@@ -16,7 +16,7 @@ const mockRosTool = vi.hoisted(() => ({
 
 const mockImportCapability = vi.hoisted(() => vi.fn().mockResolvedValue(mockRosTool));
 
-vi.mock('@/server/portal.js', () => ({
+vi.mock('@/infrastructure/transitive/transitive-tokens.js', () => ({
   signRosToolJWT: vi.fn(() => 'mock-jwt'),
 }));
 

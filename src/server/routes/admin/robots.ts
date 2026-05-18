@@ -1,26 +1,24 @@
 import { Router } from 'express';
 import utils from '@transitive-sdk/utils';
 import { ClientNotFoundError } from '@/application/use-cases/clients/errors.js';
-import type { FindClientByName } from '@/application/use-cases/clients/find-client-by-name.js';
 import { RobotNotFoundError, RobotValidationError } from '@/application/use-cases/robots/errors.js';
 import type { GetRobot } from '@/application/use-cases/robots/get-robot.js';
 import type { ListRobots } from '@/application/use-cases/robots/list-robots.js';
 import type { ListRobotUsers } from '@/application/use-cases/robots/list-robot-users.js';
 import type { SetRobotUsers } from '@/application/use-cases/robots/set-robot-users.js';
 import type { SyncRobotsFromPortal } from '@/application/use-cases/robots/sync-robots-from-portal.js';
-import type { UpdateRobotClient } from '@/application/use-cases/robots/update-robot-client.js';
+import type { UpdateRobotClientByName } from '@/application/use-cases/robots/update-robot-client-by-name.js';
 import { requireAdmin } from '@/server/auth.js';
 
 const log = utils.getLogger('routes/admin/robots');
 
 export type AdminRobotsRouterDeps = {
-  findClientByName: FindClientByName;
   getRobot: GetRobot;
   listRobots: ListRobots;
   listRobotUsers: ListRobotUsers;
   setRobotUsers: SetRobotUsers;
   syncRobotsFromPortal: SyncRobotsFromPortal;
-  updateRobotClient: UpdateRobotClient;
+  updateRobotClientByName: UpdateRobotClientByName;
 };
 
 export function createAdminRobotsRouter(deps: AdminRobotsRouterDeps) {
@@ -135,7 +133,7 @@ export function createAdminRobotsRouter(deps: AdminRobotsRouterDeps) {
      * /admin/robots/{robotId}/users:
      *   get:
      *     summary: Get users for a robot
-     *     description: Returns all users assigned to a specific robot
+     *     description: Returns all user IDs assigned to a specific robot
      *     tags:
      *       - Admin - Robots
      *     security:
@@ -149,6 +147,18 @@ export function createAdminRobotsRouter(deps: AdminRobotsRouterDeps) {
      *     responses:
      *       200:
      *         description: Robot users retrieved successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 robotId:
+     *                   type: string
+     *                 userIds:
+     *                   type: array
+     *                   items:
+     *                     type: string
+     *                   description: User IDs assigned to the robot
      *       401:
      *         description: User not authenticated or not admin
      *       500:
@@ -175,7 +185,7 @@ export function createAdminRobotsRouter(deps: AdminRobotsRouterDeps) {
      * /admin/robots/{robotId}/users:
      *   put:
      *     summary: Set users for a robot
-     *     description: Updates the users assigned to a robot (replaces all current users)
+     *     description: Updates the user IDs assigned to a robot (replaces all current users)
      *     tags:
      *       - Admin - Robots
      *     security:
@@ -195,6 +205,7 @@ export function createAdminRobotsRouter(deps: AdminRobotsRouterDeps) {
      *             properties:
      *               userIds:
      *                 type: array
+     *                 description: User IDs to assign to the robot
      *                 items:
      *                   type: string
      *     responses:
@@ -270,37 +281,17 @@ export function createAdminRobotsRouter(deps: AdminRobotsRouterDeps) {
     const robotId = req.params.robotId;
     const { clientName } = req.body || {};
 
-    if (clientName !== null && clientName !== undefined && typeof clientName !== 'string') {
-      return res.status(400).json({ error: 'clientName must be a string or null' });
-    }
-
     try {
-      if (!clientName) {
-        const result = await deps.updateRobotClient.execute({
-          robotId,
-          clientId: null,
-        });
-
-        return res.json({
-          ok: true,
-          ...result,
-          clientName: null,
-        });
-      }
-
-      const client = await deps.findClientByName.execute(clientName);
-
-      const result = await deps.updateRobotClient.execute({
-        robotId,
-        clientId: client.id,
-      });
-
+      const result = await deps.updateRobotClientByName.execute({ robotId, clientName });
       return res.json({
         ok: true,
         ...result,
-        clientName: client.name,
       });
     } catch (err) {
+      if (err instanceof RobotValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+
       if (err instanceof ClientNotFoundError) {
         return res.status(404).json({ error: err.message });
       }
